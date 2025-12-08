@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paper</title>
+    <style>
+        :root {
+            /* --- Cool Slate & Ink Palette --- */
+            --bg-primary: #f9f9fb;
+            --bg-secondary: #f1f3f6;
+            --bg-tertiary: #e8ebf0;
+            --text-primary: #2a324b;
+            --text-secondary: #5c677d;
+            --text-muted: #8a94a6;
+            --accent: #4a69bd;
+            --accent-hover: #3b5496;
+            --success: #3e8e7e;
+            --warning: #f0a500;
+            --error: #d9534f;
+            --border: #d1d8e0;
+            --shadow: rgba(74, 105, 189, 0.1);
+            --paper-shadow: rgba(42, 50, 75, 0.07);
+            --radius: 8px;
+            --transition: all 0.3s ease;
+            --paper-texture: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23f0ead6' fill-opacity='0.3'%3E%3Cpath d='M30 30c0-6.627-5.373-12-12-12s-12 5.373-12 12 5.373 12 12 12 12-5.373 12-12zm12 0c0-6.627-5.373-12-12-12s-12 5.373-12 12 5.373 12 12 12 12-5.373 12-12z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+        }
+
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box; 
+        }
+      html, body {
+    height: 100%;
+}
+
+        body { 
+            font-family: 'Georgia', 'Times New Roman', serif;
+            background: linear-gradient(135deg, #f9f6ef 0%, #f1ebe0 100%);
+            background-attachment: fixed;
+            color: var(--text-primary);
+            line-height: 1.6;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--paper-texture);
+            opacity: 0.4;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Login Screen */
+        .login-screen { 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100%; 
+            padding: 20px;
+            position: relative;
+            z-index: 2;
+          background: var(--bg-secondary);
+        }
+
+        .login-screen::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            
+            pointer-events: none;
+        }
+
+        .login-box { 
+            text-align: center; 
+            padding: 40px 35px; 
+            border-radius: var(--radius); 
+            background: var(--bg-primary);
+            border: 2px solid var(--border);
+            box-shadow: 
+                0 8px 32px var(--paper-shadow),
+                0 2px 8px var(--paper-shadow),
+                inset 0 1px 0 rgba(255, 255, 255, 0.8);
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 380px;
+        }
+
+        .login-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(212, 175, 55, 0.03) 100%);
+            border-radius: var(--radius);
+            pointer-events: none;
+        }
+
+        .login-box h1 { 
+            margin-bottom: 8px; 
+            color: var(--text-primary); 
+            font-weight: 400; 
+            font-size: 36px; 
+            letter-spacing: -0.5px;
+            font-family: 'Georgia', serif;
+            position: relative;
+        }
+
+        .login-subtitle {
+            color: var(--text-secondary);
+            font-size: 15px;
+            margin-bottom: 32px;
+            font-weight: 400;
+            font-style: italic;
+            line-height: 1.5;
+        }
+
+        .input-group {
+            position: relative;
+            margin-bottom: 28px;
+        }
+
+        .password-input { 
+            width: 100%;
+            padding: 18px 22px; 
+            font-size: 16px; 
+            border: 2px solid var(--border); 
+            border-radius: var(--radius); 
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            text-align: center; 
+            letter-spacing: 1px; 
+            outline: none; 
+            transition: var(--transition);
+            font-family: 'Courier New', monospace;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.03);
+        }
+
+        .password-input:focus { 
+            border-color: var(--accent); 
+            box-shadow: 
+                inset 0 2px 4px rgba(0, 0, 0, 0.03),
+                0 0 0 3px rgba(212, 175, 55, 0.15);
+            background: var(--bg-primary);
+        }
+
+        .password-input::placeholder {
+            color: var(--text-muted);
+            letter-spacing: normal;
+            font-family: 'Georgia', serif;
+            font-style: italic;
+        }
+
+        .enter-btn { 
+            width: 100%;
+            padding: 18px 32px; 
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+            color: var(--bg-primary); 
+            border: none; 
+            border-radius: var(--radius); 
+            font-size: 16px; 
+            font-weight: 500;
+            cursor: pointer; 
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-family: 'Georgia', serif;
+            box-shadow: 
+                0 4px 15px rgba(212, 175, 55, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        }
+
+        .enter-btn:hover:not(:disabled) { 
+            transform: translateY(-2px);
+            box-shadow: 
+                0 6px 20px rgba(212, 175, 55, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2);
+        }
+
+        .enter-btn:active {
+            transform: translateY(0);
+        }
+
+        .enter-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .error { 
+            color: var(--error); 
+            margin-top: 16px; 
+            font-size: 14px; 
+            min-height: 20px;
+            font-weight: 400;
+            font-style: italic;
+        }
+
+        /* Editor Screen */
+        .editor-screen { 
+            display: none;
+            height: 100%;
+            background: var(--bg-primary);
+            flex-direction: column;
+            position: relative;
+            z-index: 2;
+        }
+
+        .header { 
+            padding: 15px; 
+            background: var(--bg-secondary);
+            border-bottom: 3px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px var(--paper-shadow);
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent 0%, var(--accent) 50%, transparent 100%);
+            opacity: 0.3;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .app-title {
+            font-size: 24px;
+            font-weight: 400;
+            color: var(--text-primary);
+            font-family: 'Georgia', serif;
+            letter-spacing: -0.5px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .save-status { 
+            font-size: 13px; 
+            font-weight: 500;
+            padding: 8px 14px; 
+            border-radius: 20px; 
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+            min-width: 80px;
+            text-align: center;
+            font-family: 'Georgia', serif;
+        }
+
+        .save-status.saving { 
+            background: linear-gradient(135deg, var(--warning) 0%, #d4850f 100%);
+            color: white;
+            border-color: var(--warning);
+        }
+        
+        .save-status.saved { 
+            background: linear-gradient(135deg, var(--success) 0%, #5a8a69 100%);
+            color: white;
+            border-color: var(--success);
+        }
+
+        .word-count {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-weight: 400;
+            font-family: 'Georgia', serif;
+            font-style: italic;
+        }
+
+        .editor-container {
+            flex: 1;
+            position: relative;
+            margin: 20px;
+            border-radius: var(--radius);
+            background: var(--bg-primary);
+            border: 2px solid var(--border);
+            box-shadow: 
+                inset 0 2px 8px rgba(0, 0, 0, 0.03),
+                0 4px 20px var(--paper-shadow);
+        }
+
+        .editor-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                repeating-linear-gradient(
+                    transparent,
+                    transparent 29px
+                );
+            pointer-events: none;
+            z-index: 1;
+            border-radius: var(--radius);
+        }
+
+        .editor { 
+            width: 100%; 
+            height:100%;
+            padding: 25px 30px; 
+            border: none; 
+            outline: none; 
+            font-family: 'Georgia', 'Times New Roman', serif; 
+            font-size: 16px; 
+            line-height: 1.8; 
+            resize: none; 
+            background: transparent;
+            color: var(--text-primary);
+            position: relative;
+            z-index: 2;
+            border-radius: var(--radius);
+        }
+
+        .editor::placeholder {
+            color: var(--text-muted);
+            font-style: italic;
+            opacity: 0.7;
+        }
+
+        /* Scrollbar styling */
+        .editor::-webkit-scrollbar {
+            width: 12px;
+        }
+
+        .editor::-webkit-scrollbar-track {
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+        }
+
+        .editor::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+            border-radius: 6px;
+            border: 2px solid var(--bg-tertiary);
+        }
+
+        .editor::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, var(--accent-hover) 0%, #9e7c15 100%);
+        }
+
+        /* Animation for mode switching */
+        .fade-in {
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { 
+                opacity: 0; 
+                transform: translateY(20px) scale(0.98);
+            }
+            to { 
+                opacity: 1; 
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* Mobile optimizations without @media */
+        .login-box {
+            min-height: auto;
+        }
+
+        .header-right {
+            justify-content: flex-end;
+        }
+
+        .word-count {
+            white-space: nowrap;
+        }
+
+        /* Focus improvements */
+        .password-input:focus,
+        .editor:focus {
+            outline: none;
+        }
+
+        /* Subtle animations */
+        .login-box {
+            animation: slideUp 0.6s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .editor-container {
+            animation: paperUnfold 0.5s ease-out;
+        }
+
+        @keyframes paperUnfold {
+            from {
+                opacity: 0;
+                transform: scale(0.95) rotateX(5deg);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) rotateX(0deg);
+            }
+        }
+
+        /* Texture overlay for paper feel */
+        .editor-container::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--paper-texture);
+            opacity: 0.1;
+            pointer-events: none;
+            z-index: 1;
+            border-radius: var(--radius);
+        }
+    </style>
+</head>
+<body>
+    <div id="loginScreen" class="login-screen">
+        <div class="login-box">
+            <h1>Paper</h1>
+            <p class="login-subtitle">Perfect for temporary notes and secure sharing. Deleted after two days.</p>
+
+            <div class="input-group">
+                <input type="password" id="passwordInput" class="password-input" placeholder="min-8-char password" minlength="8" maxlength="100">
+            </div>
+            
+            <button onclick="login()" class="enter-btn">Enter</button>
+            <div id="loginError" class="error"></div>
+        </div>
+    </div>
+
+    <div id="editorScreen" class="editor-screen">
+        <div class="header">
+            <div class="header-left">
+                <div class="app-title">Paper</div>
+            </div>
+            <div class="header-right">
+                <div id="wordCount" class="word-count">0 words</div>
+                <div id="saveStatus" class="save-status">Ready</div>
+            </div>
+        </div>
+        <div class="editor-container">
+            <textarea id="editor" class="editor" placeholder="Start typing..."></textarea>
+        </div>
+    </div>
+
+    <script>
+        let currentPassword = '';
+        let currentSalt = null;
+        let fileHash = '';
+        let saveTimeout = null;
+        let isWorking = false;
+
+        const PBKDF2_ITERATIONS = 250000;
+
+        // --- WORD COUNT ---
+        function updateWordCount() {
+            const text = document.getElementById('editor').value;
+            const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+            const chars = text.length;
+            document.getElementById('wordCount').textContent = `${words} words, ${chars} chars`;
+        }
+
+        // --- CRYPTOGRAPHY (unchanged) ---
+        async function generateFilenameHash(password) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(password);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+        }
+
+        async function deriveKey(password, salt) {
+            const encoder = new TextEncoder();
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw',
+                encoder.encode(password),
+                { name: 'PBKDF2' },
+                false,
+                ['deriveKey']
+            );
+            return crypto.subtle.deriveKey(
+                {
+                    name: 'PBKDF2',
+                    salt: salt,
+                    iterations: PBKDF2_ITERATIONS,
+                    hash: 'SHA-256'
+                },
+                keyMaterial,
+                { name: 'AES-GCM', length: 256 },
+                true,
+                ['encrypt', 'decrypt']
+            );
+        }
+
+        async function encrypt(text, key) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(text);
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            
+            const encryptedContent = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv: iv },
+                key,
+                data
+            );
+            
+            const combined = new Uint8Array(iv.length + encryptedContent.byteLength);
+            combined.set(iv);
+            combined.set(new Uint8Array(encryptedContent), iv.length);
+            
+            return btoa(String.fromCharCode.apply(null, combined));
+        }
+
+        async function decrypt(encryptedBase64, key) {
+            try {
+                const combined = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
+                const iv = combined.slice(0, 12);
+                const encryptedContent = combined.slice(12);
+
+                const decrypted = await crypto.subtle.decrypt(
+                    { name: 'AES-GCM', iv: iv },
+                    key,
+                    encryptedContent
+                );
+                
+                return new TextDecoder().decode(decrypted);
+            } catch (error) {
+                console.error('Decryption failed:', error);
+                throw new Error('Decryption failed. Check password.');
+            }
+        }
+        
+        function base64ToUint8Array(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes;
+        }
+
+        // --- APPLICATION LOGIC ---
+        document.getElementById('passwordInput').focus();
+        document.getElementById('passwordInput').addEventListener('keypress', e => {
+            if (e.key === 'Enter') login();
+        });
+
+        // iOS Safari viewport fix
+        function fixIOSViewport() {
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            if (isIOS) {
+                const vh = window.innerHeight * 0.01;
+                document.documentElement.style.setProperty('--vh', `${vh}px`);
+                
+                window.addEventListener('resize', () => {
+                    const vh = window.innerHeight * 0.01;
+                    document.documentElement.style.setProperty('--vh', `${vh}px`);
+                });
+            }
+        }
+
+        // Call on page load
+        fixIOSViewport();
+
+        async function login() {
+            if (isWorking) return;
+            isWorking = true;
+            
+            const password = document.getElementById('passwordInput').value;
+            const errorDiv = document.getElementById('loginError');
+            const enterBtn = document.querySelector('.enter-btn');
+            
+            errorDiv.textContent = '';
+            if (password.length < 8) {
+                errorDiv.textContent = 'Password must be at least 8 characters';
+                isWorking = false;
+                return;
+            }
+            
+            enterBtn.textContent = 'Loading...';
+            enterBtn.disabled = true;
+
+            currentPassword = password;
+            fileHash = await generateFilenameHash(password);
+            
+            try {
+                const response = await fetch('/api/load', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hash: fileHash })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Login failed');
+                }
+                
+                currentSalt = base64ToUint8Array(data.salt);
+                
+                let content = '';
+                if (data.content) {
+                    const key = await deriveKey(currentPassword, currentSalt);
+                    content = await decrypt(data.content, key);
+                }
+                
+                document.getElementById('editor').value = content;
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('editorScreen').style.display = 'flex';
+                //let editor = document.getElementById('editor')
+                //editor.focus();
+                //editor.setSelectionRange(0, 0);
+                setupAutoSave();
+                updateSaveStatus('Ready');
+                updateWordCount();
+
+            } catch (error) {
+                errorDiv.textContent = error.message.includes('Decryption') ? 'Invalid password' : 'Connection error';
+            } finally {
+                isWorking = false;
+                enterBtn.textContent = 'Enter';
+                enterBtn.disabled = false;
+            }
+        }
+
+        function setupAutoSave() {
+            const editor = document.getElementById('editor');
+            
+            editor.addEventListener('input', () => {
+                clearTimeout(saveTimeout);
+                updateSaveStatus('Typing...');
+                updateWordCount();
+                
+                saveTimeout = setTimeout(saveContent, 1500);
+            });
+        }
+
+        async function saveContent() {
+            if (isWorking) return;
+            isWorking = true;
+            
+            updateSaveStatus('Saving...');
+            
+            const content = document.getElementById('editor').value;
+            
+            try {
+                const key = await deriveKey(currentPassword, currentSalt);
+                const encryptedContent = await encrypt(content, key);
+                
+                const response = await fetch('/api/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        hash: fileHash,
+                        content: encryptedContent 
+                    })
+                });
+                
+                if (response.ok) {
+                    updateSaveStatus('Saved');
+                } else {
+                    const data = await response.json();
+                    updateSaveStatus(`Error: ${data.error || 'Save failed'}`);
+                }
+            } catch (error) {
+                console.error('Save failed:', error);
+                updateSaveStatus('Save failed');
+            } finally {
+                isWorking = false;
+            }
+        }
+
+        function updateSaveStatus(status) {
+            const statusDiv = document.getElementById('saveStatus');
+            statusDiv.textContent = status;
+            
+            statusDiv.className = 'save-status';
+            if (status.includes('Saving') || status.includes('Typing')) {
+                statusDiv.className += ' saving';
+            } else if (status === 'Saved') {
+                statusDiv.className += ' saved';
+            }
+        }
+
+        // Prevent accidental page close
+        window.addEventListener('beforeunload', function(e) {
+            const statusDiv = document.getElementById('saveStatus');
+            if (statusDiv.className.includes(" saving")) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+    </script>
+</body>
+</html>
