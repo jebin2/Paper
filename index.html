@@ -431,7 +431,7 @@
     <div id="editorScreen" class="editor-screen">
         <div class="header">
             <div class="header-left">
-                <div class="app-title">Paper</div>
+                <div class="app-title" onclick="goToLogin()" style="cursor: pointer;" title="Go to login">Paper</div>
             </div>
             <div class="header-right">
                 <div id="wordCount" class="word-count">0 words</div>
@@ -665,6 +665,30 @@
             } finally {
                 isWorking = false;
             }
+        }
+
+        function goToLogin() {
+            const statusDiv = document.getElementById('saveStatus');
+            // Check if there are unsaved changes
+            if (!statusDiv.className.includes('Saved')) {
+                if (!confirm('You have unsaved changes. Are you sure you want to leave?')) {
+                    return;
+                }
+            }
+
+            // Clear sensitive data
+            currentPassword = '';
+            currentSalt = null;
+            fileHash = '';
+            clearTimeout(saveTimeout);
+
+            // Reset UI
+            document.getElementById('editor').value = '';
+            document.getElementById('passwordInput').value = '';
+            document.getElementById('loginError').textContent = '';
+            document.getElementById('editorScreen').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'flex';
+            document.getElementById('passwordInput').focus();
         }
 
         function updateSaveStatus(status) {
