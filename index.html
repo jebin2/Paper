@@ -121,7 +121,7 @@
         .card-front,
         .card-back {
             text-align: center;
-            padding: 48px 44px;
+            padding: 40px 36px;
             border-radius: var(--radius);
             background: var(--bg-card);
             border: 2px solid var(--border);
@@ -141,6 +141,7 @@
             top: 0;
             left: 0;
             right: 0;
+            bottom: 0;
             transform: rotateY(180deg);
             z-index: 1;
         }
@@ -258,6 +259,28 @@
             padding: 0;
             margin: 0 0 24px 0;
             text-align: left;
+            max-height: 200px;
+            overflow-y: auto;
+            padding-right: 8px;
+        }
+
+        /* Info list scrollbar */
+        .info-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .info-list::-webkit-scrollbar-track {
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+        }
+
+        .info-list::-webkit-scrollbar-thumb {
+            background: var(--gradient-primary);
+            border-radius: 6px;
+        }
+
+        .info-list::-webkit-scrollbar-thumb:hover {
+            background: var(--gradient-hover);
         }
 
         .info-list li {
@@ -644,7 +667,7 @@
 
             .card-front,
             .card-back {
-                padding: 32px 24px;
+                padding: 28px 20px;
             }
 
             .card-front h1 {
@@ -653,14 +676,27 @@
 
             .login-subtitle {
                 font-size: 14px;
+                margin-bottom: 24px;
+            }
+
+            .info-list {
+                margin-bottom: 16px;
             }
 
             .info-list li {
-                font-size: 12px;
+                font-size: 11px;
+                padding: 6px 0;
+                padding-left: 20px;
             }
 
             .info-title {
-                font-size: 18px;
+                font-size: 16px;
+                margin-bottom: 12px;
+            }
+
+            .info-link {
+                font-size: 11px;
+                padding: 8px 12px;
             }
         }
     </style>
@@ -691,12 +727,17 @@
                     <div class="back-icon" onclick="flipCard()" title="Back to login">X</div>
                     <h3 class="info-title">About Paper ✨</h3>
                     <ul class="info-list">
-                        <li><strong>What is it?</strong> A simple, secure notepad for temporary notes that you can
-                            access from anywhere.</li>
-                        <li><strong>Encryption:</strong> Your notes are encrypted using your password. We never store
-                            your password.</li>
-                        <li><strong>Retention:</strong> Notes are automatically deleted after 2 days of inactivity.</li>
-                        <li><strong>Privacy:</strong> No tracking, no analytics, no cookies. Just notes.</li>
+                        <li><strong>What is it?</strong> A secure notepad for temporary notes you can access from
+                            anywhere.</li>
+                        <li><strong>Encryption:</strong> Notes encrypted client-side with your password. Never sent to
+                            server.</li>
+                        <li><strong>Open Source:</strong> 100% open. Deployed on Hugging Face, Open for everyone to see.
+                        </li>
+                        <li><strong>Zero Access:</strong> Even the developer cannot read your notes. Only encrypted
+                            blobs stored.</li>
+                        <li><strong>Auto-Delete:</strong> Notes automatically deleted after 2 days of inactivity.</li>
+                        <li><strong>Pro tip:</strong> Use a strong password! If someone guesses it... well, that's on
+                            you 😅</li>
                     </ul>
                     <a href="https://github.com/jebin2/Paper" target="_blank" class="info-link">
                         🔗 View source on GitHub
