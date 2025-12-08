@@ -15,47 +15,15 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Configure Git
-        run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-
-      - name: Commit any uncommitted changes
-        run: |
-          git add -A
-          git diff --staged --quiet || git commit -m "Save working directory before LFS migration"
-
-      - name: Configure Git LFS
-        run: |
-          git lfs install
-
       - name: Fetch all LFS objects
         run: |
           git lfs fetch --all
           git lfs checkout
 
-      - name: Migrate existing files to LFS
-        run: |
-          git lfs migrate import --include="*.jpg,*.jpeg,*.png,*.gif,*.mp3,*.mp4,*.wav,*.ttf,*.db,sliding_puzzle,stockfish/stockfish-ubuntu-x86-64-avx2" --everything
-
-      - name: Track binary files with LFS
-        run: |
-          git lfs track "*.jpg" "*.jpeg" "*.png" "*.gif" "*.mp3" "*.mp4" "*.wav" "*.ttf" "*.db"
-          git lfs track "sliding_puzzle"
-          git lfs track "stockfish/stockfish-ubuntu-x86-64-avx2"
-          git add .gitattributes
-          git diff --staged --quiet || git commit -m "Configure Git LFS tracking"
-
-      - name: Fetch LFS objects after migration
-        run: |
-          git lfs fetch --all
-          git lfs pull
-
       - name: Push to Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git remote remove space 2>/dev/null || true
           git remote add space https://jebin2:${HF_TOKEN}@huggingface.co/spaces/jebin2/Paper
           git lfs push --all space main
           git push --force space main
