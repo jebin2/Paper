@@ -225,12 +225,14 @@
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
             color: var(--text-muted);
-            font-size: 16px;
+            font-size: 18px;
+            font-weight: 300;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: var(--transition);
+            line-height: 1;
         }
 
         .back-icon:hover {
@@ -686,7 +688,7 @@
 
                 <!-- Back: Info -->
                 <div class="card-back">
-                    <div class="back-icon" onclick="flipCard()" title="Back to login">←</div>
+                    <div class="back-icon" onclick="flipCard()" title="Back to login">X</div>
                     <h3 class="info-title">About Paper ✨</h3>
                     <ul class="info-list">
                         <li><strong>What is it?</strong> A simple, secure notepad for temporary notes that you can
