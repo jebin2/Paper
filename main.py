@@ -4,16 +4,27 @@ import glob
 import re
 import base64
 import time
+import tempfile
+import logging
+
+# --- LOGGING SETUP ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# --- CONFIGURATION ---
-# Store data in a dedicated directory
-DATA_DIR = os.path.join('/tmp')
-MAX_TOTAL_SIZE_MB = 100  # Max total size of all notes in MB
-PURGE_TO_SIZE_MB = 80    # When purging, reduce total size to this
-AGE_LIMIT_DAYS = 2
-MAX_CONTENT_SIZE_MB = 10  # Max size for a single note in MB
+# --- CONFIGURATION (Environment Variables with Defaults) ---
+DATA_DIR = os.environ.get('DATA_DIR', '/tmp')
+MAX_TOTAL_SIZE_MB = int(os.environ.get('MAX_TOTAL_SIZE_MB', 100))
+PURGE_TO_SIZE_MB = int(os.environ.get('PURGE_TO_SIZE_MB', 80))
+AGE_LIMIT_DAYS = int(os.environ.get('AGE_LIMIT_DAYS', 2))
+MAX_CONTENT_SIZE_MB = int(os.environ.get('MAX_CONTENT_SIZE_MB', 10))
+
+# Directory for static files (index.html, etc.)
+STATIC_DIR = os.environ.get('STATIC_DIR', os.path.dirname(os.path.abspath(__file__)))
 
 # Limit request payload size (prevents large uploads from consuming memory)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB
@@ -85,7 +96,7 @@ def cleanup_files():
         if not files_to_delete:
             return
 
-        print(f"Cleanup: Deleting {len(files_to_delete)} old/oversized file(s).")
+        logger.info(f"Cleanup: Deleting {len(files_to_delete)} old/oversized file(s).")
         for f_info in files_to_delete:
             try:
                 content_path = f_info['path']
@@ -95,20 +106,26 @@ def cleanup_files():
                 if os.path.exists(salt_path):
                     os.remove(salt_path)
             except OSError as e:
-                print(f"Cleanup: Error removing file {f_info['path']}: {e}")
+                logger.error(f"Cleanup: Error removing file {f_info['path']}: {e}")
 
     except Exception as e:
-        # Log this error in a real application
-        print(f"Error during file cleanup: {e}")
+        logger.error(f"Error during file cleanup: {e}")
 
 # --- FLASK ROUTES ---
 @app.route('/')
 def index():
-    return send_from_directory('.', 'index.html')
+    return send_from_directory(STATIC_DIR, 'index.html')
+
+@app.route('/health')
+def health():
+    """Health check endpoint for monitoring."""
+    return jsonify({'status': 'ok'})
 
 @app.route('/api/load', methods=['POST'])
 def load_content():
     data = request.json
+    if not data:
+        return jsonify({'error': 'Invalid JSON payload'}), 400
     file_hash = data.get('hash', '')
 
     # CRITICAL: Sanitize input to prevent path traversal
@@ -127,9 +144,16 @@ def load_content():
             # New note: generate a new, cryptographically secure salt
             salt_bytes = os.urandom(16)
             salt_b64 = base64.b64encode(salt_bytes).decode('utf-8')
-            # Save the new salt immediately
-            with open(salt_path, 'w', encoding='utf-8') as f:
-                f.write(salt_b64)
+            # Save the new salt atomically to prevent race conditions
+            try:
+                fd, tmp_path = tempfile.mkstemp(dir=DATA_DIR, suffix='.tmp')
+                os.write(fd, salt_b64.encode('utf-8'))
+                os.close(fd)
+                os.rename(tmp_path, salt_path)  # Atomic on POSIX
+            except OSError:
+                # If atomic write fails, fall back to direct write
+                with open(salt_path, 'w', encoding='utf-8') as f:
+                    f.write(salt_b64)
 
         # Now, handle the content. It might not exist yet for a new note.
         if os.path.exists(content_path):
@@ -140,12 +164,14 @@ def load_content():
         
         return jsonify({'content': encrypted_content, 'salt': salt_b64})
     except Exception as e:
-        print(f"Error during load: {e}") # For debugging
+        logger.error(f"Error during load: {e}")
         return jsonify({'error': 'Failed to load content from server'}), 500
 
 @app.route('/api/save', methods=['POST'])
 def save_content():
     data = request.json
+    if not data:
+        return jsonify({'error': 'Invalid JSON payload'}), 400
     file_hash = data.get('hash', '')
     encrypted_content = data.get('content', '')
 
@@ -174,7 +200,7 @@ def save_content():
         
         return jsonify({'status': 'saved'})
     except Exception as e:
-        print(f"Error during save: {e}") # For debugging
+        logger.error(f"Error during save: {e}")
         return jsonify({'error': 'Save failed on server'}), 500
 
 if __name__ == '__main__':
