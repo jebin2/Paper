@@ -13,6 +13,10 @@ DATA_DIR = os.path.join('/tmp')
 MAX_TOTAL_SIZE_MB = 100  # Max total size of all notes in MB
 PURGE_TO_SIZE_MB = 80    # When purging, reduce total size to this
 AGE_LIMIT_DAYS = 2
+MAX_CONTENT_SIZE_MB = 10  # Max size for a single note in MB
+
+# Limit request payload size (prevents large uploads from consuming memory)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB
 
 # --- SECURITY HELPER ---
 def sanitize_hash(hash_string):
@@ -100,8 +104,6 @@ def cleanup_files():
 # --- FLASK ROUTES ---
 @app.route('/')
 def index():
-    # Run cleanup routine after a successful save
-    cleanup_files()
     return send_from_directory('.', 'index.html')
 
 @app.route('/api/load', methods=['POST'])
@@ -154,6 +156,11 @@ def save_content():
     # The client must provide content to save
     if not isinstance(encrypted_content, str):
         return jsonify({'error': 'Invalid content format'}), 400
+    
+    # Validate content size to prevent abuse
+    max_content_bytes = MAX_CONTENT_SIZE_MB * 1024 * 1024
+    if len(encrypted_content.encode('utf-8')) > max_content_bytes:
+        return jsonify({'error': f'Content too large. Maximum size is {MAX_CONTENT_SIZE_MB}MB'}), 413
 
     content_path = os.path.join(DATA_DIR, f'{file_hash}_content.txt')
     
@@ -161,6 +168,9 @@ def save_content():
         # Save encrypted content directly
         with open(content_path, 'w', encoding='utf-8') as f:
             f.write(encrypted_content)
+        
+        # Run cleanup routine after a successful save
+        cleanup_files()
         
         return jsonify({'status': 'saved'})
     except Exception as e:
