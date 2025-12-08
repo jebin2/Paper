@@ -100,18 +100,49 @@
             z-index: 2;
         }
 
-        .login-box {
+        /* Flip Card Container */
+        .card-container {
+            width: 100%;
+            max-width: 420px;
+            perspective: 1000px;
+        }
+
+        .card-inner {
+            position: relative;
+            width: 100%;
+            transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            transform-style: preserve-3d;
+        }
+
+        .card-container.flipped .card-inner {
+            transform: rotateY(180deg);
+        }
+
+        .card-front,
+        .card-back {
             text-align: center;
             padding: 48px 44px;
             border-radius: var(--radius);
             background: var(--bg-card);
             border: 2px solid var(--border);
             box-shadow: var(--shadow-soft), var(--shadow-glow);
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+
+        .card-front {
             position: relative;
-            z-index: 1;
-            width: 100%;
-            max-width: 420px;
+            z-index: 2;
             animation: bounceIn 0.6s var(--transition);
+        }
+
+        .card-back {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            transform: rotateY(180deg);
+            z-index: 1;
         }
 
         @keyframes bounceIn {
@@ -153,6 +184,124 @@
             margin-bottom: 32px;
             font-weight: 500;
             line-height: 1.6;
+        }
+
+        /* Info Icon & Card Back */
+        .info-icon {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+            font-family: serif;
+            z-index: 5;
+        }
+
+        .info-icon:hover {
+            background: var(--accent-purple);
+            color: white;
+            border-color: var(--accent-purple);
+            transform: scale(1.1);
+        }
+
+        .back-icon {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+        }
+
+        .back-icon:hover {
+            background: var(--accent-pink);
+            color: white;
+            border-color: var(--accent-pink);
+            transform: scale(1.1);
+        }
+
+        .info-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 20px;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .info-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 24px 0;
+            text-align: left;
+        }
+
+        .info-list li {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.7;
+            padding: 10px 0;
+            padding-left: 24px;
+            position: relative;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .info-list li:last-child {
+            border-bottom: none;
+        }
+
+        .info-list li::before {
+            content: '✦';
+            position: absolute;
+            left: 0;
+            color: var(--accent-purple);
+        }
+
+        .info-list li strong {
+            color: var(--text-primary);
+        }
+
+        .info-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--accent-blue);
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 13px;
+            transition: var(--transition);
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border-radius: 50px;
+            border: 1px solid var(--border);
+        }
+
+        .info-link:hover {
+            color: white;
+            background: var(--accent-blue);
+            border-color: var(--accent-blue);
         }
 
         .input-group {
@@ -491,16 +640,25 @@
                 font-size: 16px;
             }
 
-            .login-box {
+            .card-front,
+            .card-back {
                 padding: 32px 24px;
             }
 
-            .login-box h1 {
+            .card-front h1 {
                 font-size: 32px;
             }
 
             .login-subtitle {
                 font-size: 14px;
+            }
+
+            .info-list li {
+                font-size: 12px;
+            }
+
+            .info-title {
+                font-size: 18px;
             }
         }
     </style>
@@ -508,17 +666,41 @@
 
 <body>
     <div id="loginScreen" class="login-screen">
-        <div class="login-box">
-            <h1>Paper</h1>
-            <p class="login-subtitle">Perfect for temporary notes and secure sharing. Deleted after two days.</p>
+        <div id="cardContainer" class="card-container">
+            <div class="card-inner">
+                <!-- Front: Login -->
+                <div class="card-front">
+                    <div class="info-icon" onclick="flipCard()" title="Learn more">i</div>
+                    <h1>Paper</h1>
+                    <p class="login-subtitle">Perfect for temporary notes and secure sharing. Deleted after two days.
+                    </p>
 
-            <div class="input-group">
-                <input type="password" id="passwordInput" class="password-input" placeholder="min-8-char password"
-                    minlength="8" maxlength="100">
+                    <div class="input-group">
+                        <input type="password" id="passwordInput" class="password-input"
+                            placeholder="min-8-char password" minlength="8" maxlength="100">
+                    </div>
+
+                    <button onclick="login()" class="enter-btn">Enter</button>
+                    <div id="loginError" class="error"></div>
+                </div>
+
+                <!-- Back: Info -->
+                <div class="card-back">
+                    <div class="back-icon" onclick="flipCard()" title="Back to login">←</div>
+                    <h3 class="info-title">About Paper ✨</h3>
+                    <ul class="info-list">
+                        <li><strong>What is it?</strong> A simple, secure notepad for temporary notes that you can
+                            access from anywhere.</li>
+                        <li><strong>Encryption:</strong> Your notes are encrypted using your password. We never store
+                            your password.</li>
+                        <li><strong>Retention:</strong> Notes are automatically deleted after 2 days of inactivity.</li>
+                        <li><strong>Privacy:</strong> No tracking, no analytics, no cookies. Just notes.</li>
+                    </ul>
+                    <a href="https://github.com/jebin2/Paper" target="_blank" class="info-link">
+                        🔗 View source on GitHub
+                    </a>
+                </div>
             </div>
-
-            <button onclick="login()" class="enter-btn">Enter</button>
-            <div id="loginError" class="error"></div>
         </div>
     </div>
 
@@ -545,6 +727,12 @@
         let isWorking = false;
 
         const PBKDF2_ITERATIONS = 250000;
+
+        // --- CARD FLIP ---
+        function flipCard() {
+            const container = document.getElementById('cardContainer');
+            container.classList.toggle('flipped');
+        }
 
         // --- WORD COUNT ---
         function updateWordCount() {
