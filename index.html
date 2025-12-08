@@ -675,7 +675,7 @@
         function goToLogin() {
             const statusDiv = document.getElementById('saveStatus');
             // Check if there are unsaved changes
-            if (!statusDiv.className.includes('Saved')) {
+            if (!statusDiv.className.includes('saved')) {
                 if (!confirm('You have unsaved changes. Are you sure you want to leave?')) {
                     return;
                 }
