@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory, abort
+from flask_cors import CORS
 import os
 import glob
 import re
@@ -15,6 +16,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# --- CORS SETUP ---
+# Enable CORS for all routes (configurable via environment)
+CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*')  # '*' allows all, or comma-separated origins
+CORS(app, origins=CORS_ORIGINS.split(',') if CORS_ORIGINS != '*' else '*')
 
 # --- CONFIGURATION (Environment Variables with Defaults) ---
 DATA_DIR = os.environ.get('DATA_DIR', '/tmp')
