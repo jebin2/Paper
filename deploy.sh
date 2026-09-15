@@ -17,7 +17,7 @@ error() { echo -e "${RED}[✗]${NC} $*"; exit 1; }
 step()  { echo -e "\n${BLUE}──${NC} $*"; }
 
 echo ""
-echo "  Paper — VPS deploy (Flask, Cloudflare Tunnel)"
+echo "  Paper — VPS deploy (FastAPI, Cloudflare Tunnel)"
 echo "  ──────────────────────────────────────────────"
 
 # ── Port and route safety ─────────────────────────────────────────────────────
@@ -245,19 +245,19 @@ info "Python $("$PYTHON" --version 2>&1 | awk '{print $2}')"
 step "Dependencies"
 "$PYTHON" -m pip install --quiet --upgrade pip
 "$PYTHON" -m pip install --quiet --upgrade -r "$APP_DIR/requirements.txt"
-"$PYTHON" -m pip install --quiet --upgrade gunicorn
+mkdir -p "$APP_DIR/data"
 info "Dependencies installed"
 
 # ── 4. Start / restart with PM2 ───────────────────────────────────────────────
 step "PM2 process"
 pm2 delete "$APP_NAME" 2>/dev/null || true
-info "Starting '$APP_NAME' (gunicorn) on 127.0.0.1:$PORT..."
+info "Starting '$APP_NAME' (uvicorn) on 127.0.0.1:$PORT..."
 PORT="$PORT" pm2 start "$PYTHON" \
   --name "$APP_NAME" \
   --cwd "$APP_DIR" \
   --interpreter none \
   --time \
-  -- -m gunicorn main:app --bind 127.0.0.1:$PORT --workers 2 --no-access-log
+  -- -m uvicorn main:app --host 127.0.0.1 --port "$PORT" --workers 1 --no-access-log
 pm2 save
 
 if ! wait_for_port 30 "$PORT" "$APP_NAME"; then

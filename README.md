@@ -49,7 +49,8 @@ A minimal, secure notepad for temporary notes. Zero tracking, zero accounts — 
 ```
 Paper/
 ├── index.html      # Single-page app (HTML + CSS + JS)
-├── main.py         # Flask backend
+├── main.py         # FastAPI backend
+├── deploy.sh       # VPS deploy (PM2 + Cloudflare Tunnel)
 ├── Dockerfile      # Container setup
 └── requirements.txt
 ```
@@ -61,7 +62,7 @@ Paper/
 - Dark theme with colorful accents
 
 ### Backend (`main.py`)
-- Flask server with CORS support
+- FastAPI server with CORS support
 - Two endpoints: `/api/load` and `/api/save`
 - File-based storage (configurable via `DATA_DIR`)
 - Auto-cleanup: files older than 2 days or when storage exceeds limit
@@ -82,7 +83,7 @@ Paper/
 pip -r requirements.txt
 
 # Start server
-python main.py
+uvicorn main:app --host 0.0.0.0 --port 7860
 ```
 
 Open http://localhost:7860

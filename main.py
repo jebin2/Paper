@@ -1,5 +1,6 @@
-from flask import Flask, request, jsonify, send_from_directory, abort
-from flask_cors import CORS
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 import os
 import glob
 import re
@@ -15,12 +16,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+app = FastAPI(title="Paper", docs_url=None, redoc_url=None)
 
 # --- CORS SETUP ---
 # Enable CORS for all routes (configurable via environment)
 CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*')  # '*' allows all, or comma-separated origins
-CORS(app, origins=CORS_ORIGINS.split(',') if CORS_ORIGINS != '*' else '*')
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS.split(',') if CORS_ORIGINS != '*' else ['*'],
+    allow_credentials=False,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 
 # --- CONFIGURATION (Environment Variables with Defaults) ---
 DATA_DIR = os.environ.get('DATA_DIR', '/tmp')
@@ -28,12 +35,7 @@ MAX_TOTAL_SIZE_MB = int(os.environ.get('MAX_TOTAL_SIZE_MB', 100))
 PURGE_TO_SIZE_MB = int(os.environ.get('PURGE_TO_SIZE_MB', 80))
 AGE_LIMIT_DAYS = int(os.environ.get('AGE_LIMIT_DAYS', 2))
 MAX_CONTENT_SIZE_MB = int(os.environ.get('MAX_CONTENT_SIZE_MB', 10))
-
-# Directory for static files (index.html, etc.)
 STATIC_DIR = os.environ.get('STATIC_DIR', os.path.dirname(os.path.abspath(__file__)))
-
-# Limit request payload size (prevents large uploads from consuming memory)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB
 
 # --- SECURITY HELPER ---
 def sanitize_hash(hash_string):
@@ -43,7 +45,6 @@ def sanitize_hash(hash_string):
     """
     if not isinstance(hash_string, str):
         return False
-    # Check for length and character set
     return bool(re.match(r'^[0-9a-f]{16}$', hash_string))
 
 # --- FILE MANAGEMENT ---
@@ -62,7 +63,7 @@ def cleanup_files():
         now = time.time()
         age_limit_seconds = AGE_LIMIT_DAYS * 24 * 60 * 60
         age_threshold = now - age_limit_seconds
-        
+
         all_file_info = []
         for f_path in content_files:
             try:
@@ -71,27 +72,27 @@ def cleanup_files():
                 all_file_info.append({'path': f_path, 'size': size, 'mtime': mtime})
             except OSError:
                 continue
-        
+
         # --- Stage 1: Identify files to delete by age ---
         files_to_keep = []
         files_to_delete = []
-        
+
         for f_info in all_file_info:
             if f_info['mtime'] < age_threshold:
                 files_to_delete.append(f_info)
             else:
                 files_to_keep.append(f_info)
-        
+
         # --- Stage 2: Identify files to delete by size from the remaining pool ---
         current_size_of_kept_files = sum(f['size'] for f in files_to_keep)
         max_size_bytes = MAX_TOTAL_SIZE_MB * 1024 * 1024
-        
+
         if current_size_of_kept_files > max_size_bytes:
             # Sort the files we were planning to keep by age (oldest first)
             files_to_keep.sort(key=lambda x: x['mtime'])
-            
+
             target_size_bytes = PURGE_TO_SIZE_MB * 1024 * 1024
-            
+
             # Move oldest files from 'keep' to 'delete' until size is acceptable
             while current_size_of_kept_files > target_size_bytes and files_to_keep:
                 file_to_move = files_to_keep.pop(0) # Oldest is at the front
@@ -107,7 +108,7 @@ def cleanup_files():
             try:
                 content_path = f_info['path']
                 salt_path = content_path.replace('_content.txt', '_salt.txt')
-                
+
                 os.remove(content_path)
                 if os.path.exists(salt_path):
                     os.remove(salt_path)
@@ -117,30 +118,30 @@ def cleanup_files():
     except Exception as e:
         logger.error(f"Error during file cleanup: {e}")
 
-# --- FLASK ROUTES ---
-@app.route('/')
+# --- FASTAPI ROUTES ---
+@app.get('/')
 def index():
-    return send_from_directory(STATIC_DIR, 'index.html')
+    return FileResponse(os.path.join(STATIC_DIR, 'index.html'))
 
-@app.route('/health')
+@app.get('/health')
 def health():
     """Health check endpoint for monitoring."""
-    return jsonify({'status': 'ok'})
+    return {'status': 'ok'}
 
-@app.route('/api/load', methods=['POST'])
-def load_content():
-    data = request.json
+@app.post('/api/load')
+async def load_content(request: Request):
+    data = await request.json()
     if not data:
-        return jsonify({'error': 'Invalid JSON payload'}), 400
+        return JSONResponse({'error': 'Invalid JSON payload'}, status_code=400)
     file_hash = data.get('hash', '')
 
     # CRITICAL: Sanitize input to prevent path traversal
     if not sanitize_hash(file_hash):
-        return jsonify({'error': 'Invalid hash format'}), 400
+        return JSONResponse({'error': 'Invalid hash format'}, status_code=400)
 
     content_path = os.path.join(DATA_DIR, f'{file_hash}_content.txt')
     salt_path = os.path.join(DATA_DIR, f'{file_hash}_salt.txt')
-    
+
     try:
         # Handle the salt first. If it doesn't exist, this is a new note.
         if os.path.exists(salt_path):
@@ -167,47 +168,44 @@ def load_content():
                 encrypted_content = f.read()
         else:
             encrypted_content = ''
-        
-        return jsonify({'content': encrypted_content, 'salt': salt_b64})
+
+        return {'content': encrypted_content, 'salt': salt_b64}
     except Exception as e:
         logger.error(f"Error during load: {e}")
-        return jsonify({'error': 'Failed to load content from server'}), 500
+        return JSONResponse({'error': 'Failed to load content from server'}, status_code=500)
 
-@app.route('/api/save', methods=['POST'])
-def save_content():
-    data = request.json
+@app.post('/api/save')
+async def save_content(request: Request):
+    data = await request.json()
     if not data:
-        return jsonify({'error': 'Invalid JSON payload'}), 400
+        return JSONResponse({'error': 'Invalid JSON payload'}, status_code=400)
     file_hash = data.get('hash', '')
     encrypted_content = data.get('content', '')
 
     # CRITICAL: Sanitize input to prevent path traversal
     if not sanitize_hash(file_hash):
-        return jsonify({'error': 'Invalid hash format'}), 400
-    
+        return JSONResponse({'error': 'Invalid hash format'}, status_code=400)
+
     # The client must provide content to save
     if not isinstance(encrypted_content, str):
-        return jsonify({'error': 'Invalid content format'}), 400
-    
+        return JSONResponse({'error': 'Invalid content format'}, status_code=400)
+
     # Validate content size to prevent abuse
     max_content_bytes = MAX_CONTENT_SIZE_MB * 1024 * 1024
     if len(encrypted_content.encode('utf-8')) > max_content_bytes:
-        return jsonify({'error': f'Content too large. Maximum size is {MAX_CONTENT_SIZE_MB}MB'}), 413
+        return JSONResponse({'error': f'Content too large. Maximum size is {MAX_CONTENT_SIZE_MB}MB'}, status_code=413)
 
     content_path = os.path.join(DATA_DIR, f'{file_hash}_content.txt')
-    
+
     try:
         # Save encrypted content directly
         with open(content_path, 'w', encoding='utf-8') as f:
             f.write(encrypted_content)
-        
+
         # Run cleanup routine after a successful save
         cleanup_files()
-        
-        return jsonify({'status': 'saved'})
+
+        return {'status': 'saved'}
     except Exception as e:
         logger.error(f"Error during save: {e}")
-        return jsonify({'error': 'Save failed on server'}), 500
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=7860, debug=False)
+        return JSONResponse({'error': 'Save failed on server'}, status_code=500)
