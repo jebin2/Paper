@@ -6,7 +6,7 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFERRED_PORT=7860
 PORT_REQUESTED="${PORT:-}"
 DOMAIN="${DOMAIN:-paper.voidall.com}"
-PYENV_ENV="${PYENV_ENV:-paper_env}"
+PYENV_ENV="${PYENV_ENV:-Paper_env}"
 PYTHON="$HOME/.pyenv/versions/$PYENV_ENV/bin/python"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
