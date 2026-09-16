@@ -439,7 +439,8 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Loads never write. Serialize with save/cleanup so content and salt are read
+	// Loads never create or change files (only an existing note's mtime, as an
+	// activity mark). Serialize with save/cleanup so content and salt are read
 	// as one consistent snapshot; the lock is released before the response is
 	// written, so a large note doesn't stall other requests.
 	storageMu.Lock()
@@ -454,6 +455,16 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	var salt []byte
 	if err == nil {
 		salt, err = os.ReadFile(notePath(fileHash, saltSuffix))
+	}
+	if err == nil {
+		// Opening a note counts as activity: expiry and size purges go by the
+		// content file's mtime, so a note that's read but never edited stays
+		// alive. Done under storageMu so cleanup can't judge a stale mtime.
+		// Only an existing note is touched — unknown links still create nothing.
+		now := time.Now()
+		if terr := os.Chtimes(notePath(fileHash, contentSuffix), now, now); terr != nil {
+			log.Printf("load: could not refresh note activity: %v", terr)
+		}
 	}
 	storageMu.Unlock()
 

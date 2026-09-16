@@ -722,6 +722,40 @@ func TestCleanupBySize(t *testing.T) {
 	}
 }
 
+func TestLoadCountsAsActivity(t *testing.T) {
+	// A note that is only read, never edited, must not expire while in use.
+	app := newTestApp(t) // ageLimitDays = 2
+	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	if code := saveNote(t, app.h, hash, "read-only note"); code != http.StatusOK {
+		t.Fatalf("save: got %d", code)
+	}
+	contentPath := filepath.Join(app.dir, hash+contentSuffix)
+	old := time.Now().Add(-72 * time.Hour)
+	if err := os.Chtimes(contentPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	_, before := loadNote(t, app.h, hash)
+
+	cleanupFiles()
+
+	if _, err := os.Stat(contentPath); err != nil {
+		t.Fatalf("recently opened note was deleted: %v", err)
+	}
+	// The activity mark must not look like an edit to other tabs.
+	if _, after := loadNote(t, app.h, hash); after.Version != before.Version || after.Content != "read-only note" {
+		t.Fatalf("load changed the note: version %q -> %q", before.Version, after.Version)
+	}
+
+	// Without any open, the same age still expires the note.
+	if err := os.Chtimes(contentPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	cleanupFiles()
+	if _, err := os.Stat(contentPath); !os.IsNotExist(err) {
+		t.Fatalf("unopened old note survived cleanup: %v", err)
+	}
+}
+
 func TestCleanupSkipsFreshlySaved(t *testing.T) {
 	// A note saved just before cleanup (same storageMu critical section) must
 	// never be deleted: simulate by saving and immediately running cleanup.

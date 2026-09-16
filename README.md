@@ -15,7 +15,7 @@ A minimal, secure notepad for temporary notes. Zero tracking, zero accounts — 
 
 - 🔐 **Client-side encryption** — Your password never leaves your browser
 - 🔗 **Private links** — Each note lives at a random, unguessable URL
-- 🗑️ **Auto-delete** — Notes removed after 2 days of inactivity
+- 🗑️ **Auto-delete** — Notes removed after 2 days without being opened or edited
 - 🌐 **Access anywhere** — Keep the link + password, open it from any device
 - 🚫 **No tracking** — No cookies, no analytics, no accounts, no third-party requests
 
@@ -80,8 +80,9 @@ Paper/
   - `save` also requires `base` = the version the edit started from (`load` and `save` both
     return the current `version`); a stale base gets `409` instead of silently overwriting
 - File-based storage (configurable via `DATA_DIR`)
-- Auto-cleanup: files older than 2 days or when storage exceeds limit,
-  run after each save and on a timer (`CLEANUP_INTERVAL_MINUTES`)
+- Auto-cleanup: notes not opened or edited for 2 days (a load refreshes the note's mtime), or
+  the oldest-active notes when storage exceeds the limit,
+  run at startup and on a timer (`CLEANUP_INTERVAL_MINUTES`), never on the request path
 - Write budget: saves are rejected (`507`) while storage is at the `MAX_TOTAL_SIZE_MB` cap, so a full disk can't be caused by writes between cleanups. Orphaned salt/token files and stale crash temps are GC'd on every cleanup.
 - Strict security headers on every response: CSP (`script-src 'self'` — the
   frontend ships as a separate `app.js`), `X-Content-Type-Options: nosniff`,

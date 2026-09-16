@@ -47,7 +47,7 @@
             badge.textContent = freshNote ? 'New note' : 'Existing note';
             badge.classList.toggle('new', freshNote);
             document.getElementById('loginSubtitle').textContent = freshNote
-                ? 'Choose a passphrase to encrypt it. Notes vanish after 2 days of inactivity.'
+                ? 'Choose a passphrase to encrypt it. Notes vanish after 2 days without being opened or edited.'
                 : 'Enter the passphrase for the note at this link.';
             document.getElementById('linkBox').hidden = !freshNote;
             document.getElementById('linkField').value = location.href;
