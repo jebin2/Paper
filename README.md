@@ -128,9 +128,11 @@ docker run -p 7860:7860 paper
 git pull && bash deploy.sh
 ```
 
-`deploy.sh` stores notes in `/var/lib/paper` (persistent, app-owned — never
-`/tmp`, which the OS can reclaim). To also put a real filesystem ceiling under
-the 100 MB app budget:
+`deploy.sh` stores notes in `/var/lib/paper` (persistent, never `/tmp`, which
+the OS can reclaim). Run it as the user the app should run as: it creates the
+directory with `sudo` (you may be prompted once) and makes that user its owner.
+Without `sudo` it falls back to `~/.local/share/paper`. To also put a real
+filesystem ceiling under the 100 MB app budget:
 
 ```bash
 QUOTA_SIZE_MB=110 bash deploy.sh   # mounts a 110 MB loopback ext4 at /var/lib/paper

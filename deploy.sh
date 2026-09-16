@@ -250,12 +250,33 @@ info "Binary built"
 
 # ── 2b. Data directory + optional filesystem quota ────────────────────────────
 step "Data directory"
-mkdir -p "$DATA_DIR" && chmod 700 "$DATA_DIR" || error "Cannot create $DATA_DIR"
-info "Data directory: $DATA_DIR"
+# The app runs as this user under PM2, so it must own the data directory.
+# /var/lib needs root to create: use sudo once, then hand the directory over.
+# Without sudo, fall back to a directory in $HOME.
+RUN_USER="$(id -un)"
+ensure_data_dir() {
+  local dir="$1"
+  if mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
+    return 0
+  fi
+  command -v sudo >/dev/null 2>&1 || return 1
+  info "Creating $dir with sudo (owned by $RUN_USER)..."
+  sudo mkdir -p "$dir" && sudo chown "$(id -u):$(id -g)" "$dir" && [ -w "$dir" ]
+}
+
+if ! ensure_data_dir "$DATA_DIR"; then
+  FALLBACK_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/paper"
+  warn "Cannot create or write $DATA_DIR (no sudo?) — using $FALLBACK_DIR instead"
+  DATA_DIR="$FALLBACK_DIR"
+  ensure_data_dir "$DATA_DIR" || error "Cannot create $DATA_DIR"
+fi
+chmod 700 "$DATA_DIR" || error "Cannot set permissions on $DATA_DIR"
+info "Data directory: $DATA_DIR (owner: $RUN_USER)"
 
 # Opt-in loopback filesystem quota. The app has its own 100 MB write budget,
 # but an OS-level limit defends against a compromised process or unexpected
 # files. Set QUOTA_SIZE_MB=e.g. 110 (slightly above MAX_TOTAL_SIZE_MB) to use.
+# Mounting needs root, so this step uses sudo.
 if [ -n "${QUOTA_SIZE_MB:-}" ]; then
   QUOTA_IMG="$APP_DIR/data/quota.img"
   if mountpoint -q "$DATA_DIR" 2>/dev/null; then
@@ -268,10 +289,12 @@ if [ -n "${QUOTA_SIZE_MB:-}" ]; then
         && mkfs.ext4 -F -q "$QUOTA_IMG" \
         || warn "Could not create quota image — continuing without quota"
     fi
-    if mount -o loop "$QUOTA_IMG" "$DATA_DIR" 2>/dev/null; then
+    if [ -f "$QUOTA_IMG" ] && sudo mount -o loop "$QUOTA_IMG" "$DATA_DIR" 2>/dev/null; then
+      # A fresh filesystem's root is owned by root: give it back to the app user.
+      sudo chown "$(id -u):$(id -g)" "$DATA_DIR" && chmod 700 "$DATA_DIR"
       info "Mounted ${QUOTA_SIZE_MB}MB filesystem at $DATA_DIR"
     else
-      warn "Could not mount quota image (kernel module? permissions?) — continuing without quota"
+      warn "Could not mount quota image (sudo? loop device?) — continuing without quota"
     fi
   fi
 fi
