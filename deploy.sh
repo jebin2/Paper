@@ -8,6 +8,11 @@ PORT_REQUESTED="${PORT:-}"
 DOMAIN="${DOMAIN:-paper.voidall.com}"
 BUILD_DIR="$APP_DIR"
 
+# Always use the toolchain actually installed on this machine. Without this,
+# any `go` invocation in a module whose go.mod demands a newer Go silently
+# tries to download that toolchain — and fails on VPSes without proxy access.
+export GOTOOLCHAIN=local
+
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[✓]${NC} $*"; }
