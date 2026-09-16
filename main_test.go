@@ -29,6 +29,9 @@ func resetConfig(t *testing.T) string {
 	maxContentBytes = int64(maxContentSizeMB) * 1024 * 1024
 	maxRequestBytes = maxContentBytes + 64*1024
 	usedBytes = 0
+	saveRatePerMin = 0 // limiting has its own tests; keep load/concurrency tests unthrottled
+	loadRatePerMin = 0
+	trustProxyHeader = ""
 	return dir
 }
 

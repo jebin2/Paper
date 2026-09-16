@@ -246,7 +246,11 @@
                 body: JSON.stringify({ hash: id })
             });
             const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Load failed');
+            if (!response.ok) {
+                const err = new Error(data.error || 'Load failed');
+                err.status = response.status;
+                throw err;
+            }
             return data;
         }
 
@@ -320,7 +324,9 @@
             } catch (error) {
                 errorDiv.textContent = error.message.includes('Decryption')
                     ? 'Wrong passphrase for this note'
-                    : "Couldn't reach the server — check your connection";
+                    : error.status === 429
+                        ? 'Too many attempts — wait a few seconds and try again'
+                        : "Couldn't reach the server — check your connection";
             } finally {
                 isWorking = false;
                 renderLoginMode();
@@ -339,6 +345,7 @@
             let failed = false;
 
             let rejected = false;
+            let lastStatus = 0;
 
             try {
                 const encryptedContent = await encrypt(content, currentKey);
@@ -354,6 +361,7 @@
                 // 403: the note at this link belongs to a different passphrase
                 // (e.g. someone else created it first). Retrying can't fix that.
                 rejected = error.status === 403;
+                lastStatus = error.status;
                 if (error.status === 409) setConflict(true);
             } finally {
                 isSaving = false;
@@ -372,7 +380,8 @@
                     const delay = failed
                         ? SAVE_RETRY_BACKOFF[retryAttempt = Math.min(retryAttempt + 1, SAVE_RETRY_BACKOFF.length - 1)]
                         : 1500; // edits arrived mid-save: normal debounce
-                    if (failed) updateSaveStatus('Not saved', 'error', ` · retrying in ${delay / 1000}s`);
+                    if (failed) updateSaveStatus('Not saved', 'error',
+                        `${lastStatus === 429 ? ' · too many saves' : ''} · retrying in ${delay / 1000}s`);
                     clearTimeout(saveTimeout);
                     saveTimeout = setTimeout(saveIfDirty, delay);
                 }

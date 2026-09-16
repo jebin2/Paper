@@ -16,6 +16,7 @@ COPY fonts ./fonts
 ENV LISTEN_PORT=7860 \
     LISTEN_ADDR=0.0.0.0 \
     DATA_DIR=/app/data \
-    STATIC_DIR=/app
+    STATIC_DIR=/app \
+    TRUST_PROXY_HEADER=X-Forwarded-For
 EXPOSE 7860
 CMD ["/usr/local/bin/paper"]

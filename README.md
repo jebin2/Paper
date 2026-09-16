@@ -53,9 +53,8 @@ Paper/
 ├── app.js          # Frontend logic (external JS enables strict CSP)
 ├── fonts/          # Self-hosted Plus Jakarta Sans (woff2, SIL OFL 1.1)
 ├── main.go         # Go backend (single binary, stdlib only)
-├── deploy.sh       # VPS deploy (PM2 + Cloudflare Tunnel + rate limiting)
-├── cloudflare/
-│   └── rate-limit.py  # Edge rate limiting rules (idempotent, Zone.WAF API)
+├── ratelimit.go    # Per-client rate limiting for the API (token buckets)
+├── deploy.sh       # VPS deploy (PM2 + Cloudflare Tunnel)
 ├── Dockerfile      # Multi-stage container build
 └── go.mod
 ```
@@ -102,6 +101,9 @@ Paper/
 | `MAX_CONTENT_SIZE_MB` | `10` | Max note size |
 | `CLEANUP_INTERVAL_MINUTES` | `15` | Background cleanup interval |
 | `CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins; empty = CORS disabled |
+| `RATE_LIMIT_SAVE_PER_MIN` | `60` | `/api/save` requests per client per minute; `0` disables |
+| `RATE_LIMIT_LOAD_PER_MIN` | `120` | `/api/load` requests per client per minute; `0` disables |
+| `TRUST_PROXY_HEADER` | *(empty)* | Header holding the real client IP behind a proxy (`CF-Connecting-IP` in `deploy.sh`, `X-Forwarded-For` in Docker); empty = connection address |
 
 ## Run Locally
 
@@ -137,40 +139,38 @@ QUOTA_SIZE_MB=110 bash deploy.sh   # mounts a 110 MB loopback ext4 at /var/lib/p
 The quota is opt-in (needs root + loop device support). Set `DATA_DIR` to
 override the storage location.
 
-### Cloudflare rate limiting (edge)
+### Rate limiting
 
-The server has no app-level rate limit, so it's enforced at the Cloudflare edge,
-just before the tunnel. The rule fits the **Cloudflare Free plan**. `deploy.sh`
-applies it when two vars are set:
+The server limits each client itself — no Cloudflare rules or API tokens needed.
+Every client gets a token bucket per endpoint:
 
-```bash
-export CF_API_TOKEN=<token>   # needs Zone.WAF:Edit on the zone
-export CF_ZONE_ID=<zone id>
-export CF_RATE=30             # optional, requests per 10 s per IP
-git pull && bash deploy.sh
-```
+| Endpoint | Default | Burst |
+|----------|---------|-------|
+| `/api/save` | 60 / min | 30 |
+| `/api/load` | 120 / min | 60 |
 
-The Free plan allows one rate limiting rule per zone, matching on the URI path
-only, with a fixed 10 s window and 10 s block. So Paper uses a single rule:
+Over the limit, requests get `429` with `Retry-After`, before the body is even
+read. The editor shows "too many saves" and retries with backoff; the login
+screen asks to wait. Normal use stays far below this (autosave fires at most
+once per 1.5 s per tab).
 
-| Matches | Limit | After breach |
-|---------|-------|--------------|
-| path `/api/save` or `/api/load` | 30 requests / 10 s per IP (shared) | HTTP 429 for 10 s |
+**Client identity.** Behind a proxy every request comes from the proxy, so the
+real IP must come from a header — set `TRUST_PROXY_HEADER`, but only when the
+server can't be reached except through that proxy, or clients could spoof it:
 
-Normal use stays well below this: autosave fires at most once per 1.5 s per tab.
+- `deploy.sh` binds to `127.0.0.1` behind the Cloudflare Tunnel and uses
+  `CF-Connecting-IP`.
+- The Docker image uses `X-Forwarded-For` (first entry) for hosts like Hugging Face
+  Spaces. If the container port is exposed directly, set `TRUST_PROXY_HEADER=` so
+  the connection address is used instead.
 
-Free-plan consequences to be aware of:
-- The rule can't filter by hostname or method, so it applies to those two paths on
-  **every hostname in the zone**.
-- The zone's single rate limiting slot is used by Paper. If another rule already
-  holds it, `apply` stops and says so instead of failing halfway.
-- It slows abuse down; it doesn't cap it. 30 saves/10 s of 10 MB notes can still fill
-  the 100 MB storage budget, after which saves get `507` until cleanup.
+IPv6 clients are grouped by `/64`, so rotating addresses within one allocation
+doesn't dodge the limit. Limiter memory is bounded (100k tracked clients; idle
+ones are swept); past that, new clients are let through rather than locked out.
 
-`apply` is idempotent (adds, updates in place, or leaves the rule unchanged) and
-removes rules left by the older two-rule version. Other subcommands: `list`,
-`remove` (Paper rules only), `show` (print the JSON to add by hand in the dashboard).
-On a paid plan, `--paid-plan` unlocks other `--period` / `--mitigation` values.
+Rate limiting slows abuse, it doesn't cap it: many IPs, or big notes, can still
+fill the `MAX_TOTAL_SIZE_MB` budget, after which saves get `507` until cleanup.
+Lowering `MAX_CONTENT_SIZE_MB` makes that much slower.
 
 ## Security Notes
 

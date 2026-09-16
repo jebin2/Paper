@@ -280,7 +280,11 @@ fi
 step "PM2 process"
 pm2 delete "$APP_NAME" 2>/dev/null || true
 info "Starting '$APP_NAME' (paper binary) on 127.0.0.1:$PORT..."
-LISTEN_ADDR=127.0.0.1 LISTEN_PORT="$PORT" STATIC_DIR="$APP_DIR" DATA_DIR="$DATA_DIR" pm2 start "$APP_DIR/paper" \
+# Bound to 127.0.0.1, so every request arrives through the Cloudflare Tunnel:
+# CF-Connecting-IP (set by Cloudflare, not the visitor) is the real client IP
+# used for per-client rate limiting.
+LISTEN_ADDR=127.0.0.1 LISTEN_PORT="$PORT" STATIC_DIR="$APP_DIR" DATA_DIR="$DATA_DIR" \
+TRUST_PROXY_HEADER="${TRUST_PROXY_HEADER:-CF-Connecting-IP}" pm2 start "$APP_DIR/paper" \
   --name "$APP_NAME" \
   --cwd "$APP_DIR" \
   --interpreter none \
@@ -336,20 +340,6 @@ PYEOF
       systemctl is-active --quiet cloudflared 2>/dev/null && sudo systemctl restart cloudflared && info "cloudflared restarted" \
         || warn "Restart cloudflared manually: sudo systemctl restart cloudflared" ;;
   esac
-fi
-
-# ── 4b. Cloudflare rate limiting (edge) ──────────────────────────────────────
-step "Cloudflare Rate Limiting"
-if [ -z "${CF_API_TOKEN:-}" ] || [ -z "${CF_ZONE_ID:-}" ]; then
-  warn "Set CF_API_TOKEN + CF_ZONE_ID to manage the rate limits via API.
-  Skipping — rules can be added manually in the dashboard (see README)."
-else
-  if python3 "$APP_DIR/cloudflare/rate-limit.py" apply \
-      --token "$CF_API_TOKEN" --zone-id "$CF_ZONE_ID" --rate "${CF_RATE:-30}"; then
-    info "Edge rate limiting: /api/save + /api/load, ${CF_RATE:-30} req/10s per IP (Free plan rule)"
-  else
-    warn "Cloudflare rate-limit step failed — deploy continues, check the error above."
-  fi
 fi
 
 # ── 5. Verify it actually came up ─────────────────────────────────────────────

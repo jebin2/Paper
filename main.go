@@ -35,6 +35,9 @@ var (
 	staticDir        = getenv("STATIC_DIR", "")
 	listenAddr       = getenv("LISTEN_ADDR", "0.0.0.0")
 	listenPort       = getenv("LISTEN_PORT", "7860")
+	saveRatePerMin   = getenvInt("RATE_LIMIT_SAVE_PER_MIN", 60)
+	loadRatePerMin   = getenvInt("RATE_LIMIT_LOAD_PER_MIN", 120)
+	trustProxyHeader = getenv("TRUST_PROXY_HEADER", "")
 	maxContentBytes  = int64(maxContentSizeMB) * 1024 * 1024
 	maxRequestBytes  = maxContentBytes + 64*1024 // JSON envelope overhead on top of the content limit
 )
@@ -80,6 +83,8 @@ func validateConfig() error {
 		return errors.New("MAX_CONTENT_SIZE_MB must be > 0")
 	case ageLimitDays < 0:
 		return errors.New("AGE_LIMIT_DAYS must be >= 0")
+	case saveRatePerMin < 0 || loadRatePerMin < 0:
+		return errors.New("RATE_LIMIT_*_PER_MIN must be >= 0 (0 disables)")
 	case cleanupInterval <= 0:
 		return errors.New("CLEANUP_INTERVAL_MINUTES must be > 0")
 	}
@@ -398,6 +403,13 @@ func fontsHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(staticDir, "fonts", name))
 }
 
+func clientIPSource() string {
+	if trustProxyHeader == "" {
+		return "connection address"
+	}
+	return trustProxyHeader + " header"
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -603,8 +615,8 @@ func newHandler() http.Handler {
 	})
 	mux.HandleFunc("/fonts/", fontsHandler)
 	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/api/load", loadHandler)
-	mux.HandleFunc("/api/save", saveHandler)
+	mux.HandleFunc("/api/load", rateLimited(newRateLimiter(loadRatePerMin), loadHandler))
+	mux.HandleFunc("/api/save", rateLimited(newRateLimiter(saveRatePerMin), saveHandler))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		applySecurityHeaders(w)
@@ -645,6 +657,8 @@ func main() {
 
 	go func() {
 		log.Printf("Paper listening on http://%s (data dir: %s)", srv.Addr, dataDir)
+		log.Printf("Rate limits per client: save %d/min, load %d/min (0 = off); client IP from %s",
+			saveRatePerMin, loadRatePerMin, clientIPSource())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server error: %v", err)
 		}
