@@ -6,8 +6,7 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFERRED_PORT=7860
 PORT_REQUESTED="${PORT:-}"
 DOMAIN="${DOMAIN:-paper.voidall.com}"
-PYENV_ENV="${PYENV_ENV:-Paper_env}"
-PYTHON="$HOME/.pyenv/versions/$PYENV_ENV/bin/python"
+BUILD_DIR="$APP_DIR"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -17,7 +16,7 @@ error() { echo -e "${RED}[✗]${NC} $*"; exit 1; }
 step()  { echo -e "\n${BLUE}──${NC} $*"; }
 
 echo ""
-echo "  Paper — VPS deploy (FastAPI, Cloudflare Tunnel)"
+echo "  Paper — VPS deploy (Go, Cloudflare Tunnel)"
 echo "  ──────────────────────────────────────────────"
 
 # ── Port and route safety ─────────────────────────────────────────────────────
@@ -234,30 +233,25 @@ if ! command -v pm2 &>/dev/null; then
 fi
 info "PM2 $(pm2 --version 2>/dev/null)"
 
-# ── 2. Python environment (pyenv-virtualenv) ──────────────────────────────────
-step "Python env ($PYENV_ENV)"
-if [ ! -x "$PYTHON" ]; then
-  error "pyenv env '$PYENV_ENV' not found at $PYTHON.\n\n  Create it once, e.g.:\n    pyenv install 3.10.12\n    pyenv virtualenv 3.10.12 $PYENV_ENV\n\n  Then re-run this script."
+# ── 2. Build ──────────────────────────────────────────────────────────────────
+step "Build"
+if ! command -v go &>/dev/null; then
+  error "Go not found. Install it (https://go.dev/dl/) then re-run."
 fi
-info "Python $("$PYTHON" --version 2>&1 | awk '{print $2}')"
-
-# ── 3. Dependencies ───────────────────────────────────────────────────────────
-step "Dependencies"
-"$PYTHON" -m pip install --quiet --upgrade pip
-"$PYTHON" -m pip install --quiet --upgrade -r "$APP_DIR/requirements.txt"
+info "Go $(go version | awk '{print $3}') building..."
+(cd "$APP_DIR" && CGO_ENABLED=0 go build -o paper .)
 mkdir -p "$APP_DIR/data"
-info "Dependencies installed"
+info "Binary built"
 
-# ── 4. Start / restart with PM2 ───────────────────────────────────────────────
+# ── 3. Start / restart with PM2 ───────────────────────────────────────────────
 step "PM2 process"
 pm2 delete "$APP_NAME" 2>/dev/null || true
-info "Starting '$APP_NAME' (uvicorn) on 127.0.0.1:$PORT..."
-PORT="$PORT" pm2 start "$PYTHON" \
+info "Starting '$APP_NAME' (paper binary) on 127.0.0.1:$PORT..."
+LISTEN_ADDR=127.0.0.1 LISTEN_PORT="$PORT" STATIC_DIR="$APP_DIR" pm2 start "$APP_DIR/paper" \
   --name "$APP_NAME" \
   --cwd "$APP_DIR" \
   --interpreter none \
-  --time \
-  -- -m uvicorn main:app --host 127.0.0.1 --port "$PORT" --workers 1 --no-access-log
+  --time
 pm2 save
 
 if ! wait_for_port 30 "$PORT" "$APP_NAME"; then
@@ -272,7 +266,7 @@ if [ -n "$STARTUP_CMD" ]; then
     || warn "Could not register PM2 startup — run manually: $STARTUP_CMD"
 fi
 
-# ── 5. Cloudflare Tunnel ──────────────────────────────────────────────────────
+# ── 4. Cloudflare Tunnel ──────────────────────────────────────────────────────
 step "Cloudflare Tunnel"
 if [ -z "$CF_CONFIG" ]; then
   warn "cloudflared config not found. Ensure this ingress rule exists:"
@@ -311,7 +305,7 @@ PYEOF
   esac
 fi
 
-# ── 6. Verify it actually came up ─────────────────────────────────────────────
+# ── 5. Verify it actually came up ─────────────────────────────────────────────
 step "Health"
 sleep 2
 if curl -fsS -o /dev/null "http://127.0.0.1:$PORT/health" 2>/dev/null; then
@@ -328,7 +322,7 @@ echo ""
 echo "  ─────────────────────────────────────────"
 info "Done!"
 echo ""
-echo "  FastAPI on 127.0.0.1:$PORT"
+echo "  Go server on 127.0.0.1:$PORT"
 echo "  Tunnel:  https://$DOMAIN"
 echo ""
 echo "  Useful commands:"

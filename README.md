@@ -49,10 +49,10 @@ A minimal, secure notepad for temporary notes. Zero tracking, zero accounts — 
 ```
 Paper/
 ├── index.html      # Single-page app (HTML + CSS + JS)
-├── main.py         # FastAPI backend
+├── main.go         # Go backend (single binary, stdlib only)
 ├── deploy.sh       # VPS deploy (PM2 + Cloudflare Tunnel)
-├── Dockerfile      # Container setup
-└── requirements.txt
+├── Dockerfile      # Multi-stage container build
+└── go.mod
 ```
 
 ### Frontend (`index.html`)
@@ -61,29 +61,32 @@ Paper/
 - Auto-save with debounce (1.5s after typing stops)
 - Dark theme with colorful accents
 
-### Backend (`main.py`)
-- FastAPI server with CORS support
+### Backend (`main.go`)
+- Go HTTP server, stdlib only, compiles to a single static binary
 - Two endpoints: `/api/load` and `/api/save`
 - File-based storage (configurable via `DATA_DIR`)
-- Auto-cleanup: files older than 2 days or when storage exceeds limit
+- Auto-cleanup: files older than 2 days or when storage exceeds limit,
+  run after each save and on a timer (`CLEANUP_INTERVAL_MINUTES`)
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `LISTEN_ADDR` | `0.0.0.0` | Bind address |
+| `LISTEN_PORT` | `7860` | Bind port |
 | `DATA_DIR` | `/tmp` | Storage directory |
 | `AGE_LIMIT_DAYS` | `2` | Days before auto-delete |
 | `MAX_TOTAL_SIZE_MB` | `100` | Max storage size |
 | `MAX_CONTENT_SIZE_MB` | `10` | Max note size |
+| `CLEANUP_INTERVAL_MINUTES` | `15` | Background cleanup interval |
+| `CORS_ORIGINS` | `*` | Allowed CORS origins, comma-separated |
 
 ## Run Locally
 
 ```bash
-# Install dependencies
-pip -r requirements.txt
-
-# Start server
-uvicorn main:app --host 0.0.0.0 --port 7860
+# Build & run
+go build -o paper .
+./paper
 ```
 
 Open http://localhost:7860
@@ -94,6 +97,11 @@ Open http://localhost:7860
 ```bash
 docker build -t paper .
 docker run -p 7860:7860 paper
+```
+
+### VPS (PM2 + Cloudflare Tunnel)
+```bash
+git pull && bash deploy.sh
 ```
 
 ## Security Notes
