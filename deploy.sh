@@ -345,8 +345,8 @@ if [ -z "${CF_API_TOKEN:-}" ] || [ -z "${CF_ZONE_ID:-}" ]; then
   Skipping — rules can be added manually in the dashboard (see README)."
 else
   if python3 "$APP_DIR/cloudflare/rate-limit.py" apply \
-      --token "$CF_API_TOKEN" --zone-id "$CF_ZONE_ID" --host "$DOMAIN"; then
-    info "Edge rate limiting: /api/save and /api/load covered (per-IP, per zone)"
+      --token "$CF_API_TOKEN" --zone-id "$CF_ZONE_ID" --rate "${CF_RATE:-30}"; then
+    info "Edge rate limiting: /api/save + /api/load, ${CF_RATE:-30} req/10s per IP (Free plan rule)"
   else
     warn "Cloudflare rate-limit step failed — deploy continues, check the error above."
   fi

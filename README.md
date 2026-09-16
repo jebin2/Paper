@@ -139,30 +139,38 @@ override the storage location.
 
 ### Cloudflare rate limiting (edge)
 
-The server has no app-level rate limit; the review-priority fix is to put it at
-the Cloudflare edge, just before the tunnel. `deploy.sh` does this for you when
-two vars are set:
+The server has no app-level rate limit, so it's enforced at the Cloudflare edge,
+just before the tunnel. The rule fits the **Cloudflare Free plan**. `deploy.sh`
+applies it when two vars are set:
 
 ```bash
-export CF_API_TOKEN=<token>   # needs Zone.WAF:Edit on paper.voidall.com
+export CF_API_TOKEN=<token>   # needs Zone.WAF:Edit on the zone
 export CF_ZONE_ID=<zone id>
+export CF_RATE=30             # optional, requests per 10 s per IP
 git pull && bash deploy.sh
 ```
 
-The rules are applied to the `http_ratelimit` phase of the zone. They only match
-your Paper hostname, only `POST` on `/api/save` and `/api/load`, and are keyed by
-visitor IP. Applying is **idempotent and additive**: a pre-existing entry point
-and any non-Paper rules are left untouched, so it's safe to re-run. Defaults:
+The Free plan allows one rate limiting rule per zone, matching on the URI path
+only, with a fixed 10 s window and 10 s block. So Paper uses a single rule:
 
-| Rule | Limit | After breach |
-|------|-------|--------------|
-| `/api/save` (fs writes + fsync) | 120 req/min/IP | blocked 5 min |
-| `/api/load` | 600 req/min/IP | blocked 1 min |
+| Matches | Limit | After breach |
+|---------|-------|--------------|
+| path `/api/save` or `/api/load` | 30 requests / 10 s per IP (shared) | HTTP 429 for 10 s |
 
-Tune with flags: `python3 cloudflare/rate-limit.py apply --token .. --zone-id .. \
---host paper.voidall.com --save-rate 120 --load-rate 600 --period 60 \
---mitigation 300`. Other subcommands: `list`, `remove` (paper rules only),
-`show` (print the JSON to apply by hand via the dashboard).
+Normal use stays well below this: autosave fires at most once per 1.5 s per tab.
+
+Free-plan consequences to be aware of:
+- The rule can't filter by hostname or method, so it applies to those two paths on
+  **every hostname in the zone**.
+- The zone's single rate limiting slot is used by Paper. If another rule already
+  holds it, `apply` stops and says so instead of failing halfway.
+- It slows abuse down; it doesn't cap it. 30 saves/10 s of 10 MB notes can still fill
+  the 100 MB storage budget, after which saves get `507` until cleanup.
+
+`apply` is idempotent (adds, updates in place, or leaves the rule unchanged) and
+removes rules left by the older two-rule version. Other subcommands: `list`,
+`remove` (Paper rules only), `show` (print the JSON to add by hand in the dashboard).
+On a paid plan, `--paid-plan` unlocks other `--period` / `--mitigation` values.
 
 ## Security Notes
 
