@@ -60,14 +60,15 @@
             updateStrength();
         }
 
+        // Length is the only thing measured, so the labels only talk about length.
         function updateStrength() {
             const len = document.getElementById('passwordInput').value.length;
             const meter = document.getElementById('strength');
             let level = '', label = '';
             if (len === 0) { level = ''; label = '16+ characters recommended'; }
             else if (len < 8) { level = 'weak'; label = `Too short (${len}/8)`; }
-            else if (len < 16) { level = 'ok'; label = 'OK — longer is stronger'; }
-            else { level = 'strong'; label = 'Strong'; }
+            else if (len < 16) { level = 'ok'; label = `Long enough — 16+ is better (${len})`; }
+            else { level = 'strong'; label = 'Good length'; }
             meter.dataset.level = level;
             document.getElementById('strengthText').textContent = label;
         }
@@ -206,7 +207,7 @@
         });
         document.getElementById('enterBtn').addEventListener('click', login);
         document.getElementById('newNoteLink').addEventListener('click', newNote);
-        document.getElementById('lockBtn').addEventListener('click', goToLogin);
+        document.getElementById('lockBtn').addEventListener('click', lockNote);
 
         // Every note lives at a random link. A visitor landing without one gets
         // a freshly-generated capability; returning visitors keep theirs.
@@ -412,14 +413,38 @@
             document.getElementById('passwordInput').focus();
         }
 
-        function goToLogin() {
-            // Check if there are unsaved changes
-            if (dirty || isSaving) {
-                if (!confirm('You have unsaved changes. Are you sure you want to leave?')) {
-                    return;
+        // Locking with pending edits first tries to save them right away; the
+        // user is only asked when that isn't possible (offline, conflict, ...).
+        async function lockNote() {
+            if (!sessionActive) return;
+            const lockBtn = document.getElementById('lockBtn');
+            lockBtn.disabled = true;
+            try {
+                if (!conflict && (dirty || isSaving)) {
+                    clearTimeout(saveTimeout);
+                    while (isSaving) await new Promise(r => setTimeout(r, 100));
+                    if (dirty && !conflict) await saveIfDirty();
                 }
+                if ((dirty || isSaving) && !(await confirmLock())) return;
+                goToLogin();
+            } finally {
+                lockBtn.disabled = false;
             }
+        }
 
+        function confirmLock() {
+            const dialog = document.getElementById('lockDialog');
+            document.getElementById('lockDialogText').textContent = conflict
+                ? 'This note was changed elsewhere and your edits here aren\'t saved. If you lock now, they\'ll be lost.'
+                : 'Your latest edits couldn\'t be saved. If you lock now, they\'ll be lost.';
+            return new Promise(resolve => {
+                dialog.returnValue = 'cancel';
+                dialog.addEventListener('close', () => resolve(dialog.returnValue === 'lock'), { once: true });
+                dialog.showModal();
+            });
+        }
+
+        function goToLogin() {
             // Clear sensitive data — the note link itself stays in the URL, so
             // logging out reopens the same note.
             currentKey = null;
