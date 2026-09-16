@@ -29,7 +29,7 @@ var (
 	maxTotalSizeMB   = getenvInt("MAX_TOTAL_SIZE_MB", 100)
 	purgeToSizeMB    = getenvInt("PURGE_TO_SIZE_MB", 80)
 	ageLimitDays     = getenvInt("AGE_LIMIT_DAYS", 2)
-	maxContentSizeMB = getenvInt("MAX_CONTENT_SIZE_MB", 10)
+	maxContentSizeMB = getenvInt("MAX_CONTENT_SIZE_MB", 1) // encrypted + base64: 1 MB ≈ 750 KB of text
 	cleanupInterval  = time.Duration(getenvInt("CLEANUP_INTERVAL_MINUTES", 15)) * time.Minute
 	corsOrigins      = getenv("CORS_ORIGINS", "")
 	staticDir        = getenv("STATIC_DIR", "")
@@ -415,13 +415,23 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+func writeContentTooLarge(w http.ResponseWriter) {
+	writeJSON(w, http.StatusRequestEntityTooLarge,
+		map[string]string{"error": "Note too large. Maximum size is " + strconv.Itoa(maxContentSizeMB) + "MB encrypted"})
+}
+
 func decodeJSONBody(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 
 	var body map[string]string
 	dec := json.NewDecoder(r.Body)
 	if err := dec.Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON payload"})
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeContentTooLarge(w)
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON payload"})
+		}
 		return nil, false
 	}
 	// Reject anything after the single JSON value: a second object OR trailing
@@ -516,8 +526,7 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if int64(len(encryptedContent)) > maxContentBytes {
-		writeJSON(w, http.StatusRequestEntityTooLarge,
-			map[string]string{"error": "Content too large. Maximum size is " + strconv.Itoa(maxContentSizeMB) + "MB"})
+		writeContentTooLarge(w)
 		return
 	}
 

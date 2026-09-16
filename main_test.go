@@ -544,6 +544,11 @@ func TestOversizedContent(t *testing.T) {
 	if code := saveNote(t, app.h, hash, tooBig); code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized save: got %d, want 413", code)
 	}
+	// Far past the limit the body reader itself trips; still 413, not 400.
+	wayTooBig := strings.Repeat("a", int(maxRequestBytes*2))
+	if code := saveNote(t, app.h, hash, wayTooBig); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("far oversized save: got %d, want 413", code)
+	}
 	// nothing persisted for a rejected save
 	if _, err := os.Stat(filepath.Join(app.dir, hash+"_content.txt")); !os.IsNotExist(err) {
 		t.Fatalf("rejected save still wrote a file: %v", err)

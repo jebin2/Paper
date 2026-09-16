@@ -99,7 +99,7 @@
         // --- CRYPTOGRAPHY ---
 
         // Chunked conversion helpers that avoid the call-stack limit on
-        // 10 MB payloads.  `String.fromCharCode.apply()` blows the stack
+        // large payloads.  `String.fromCharCode.apply()` blows the stack
         // when the array is > ~65 k elements; 8 KB chunks stay safe.
         function toBase64(bytes) {
             const CHUNK = 8192;
@@ -360,7 +360,9 @@
                 failed = true;
                 // 403: the note at this link belongs to a different passphrase
                 // (e.g. someone else created it first). Retrying can't fix that.
-                rejected = error.status === 403;
+                // 413: the note is over the server's size limit. Retrying the
+                // same text can't succeed; the next edit tries again.
+                rejected = error.status === 403 || error.status === 413;
                 lastStatus = error.status;
                 if (error.status === 409) setConflict(true);
             } finally {
@@ -375,7 +377,9 @@
                     updateSaveStatus('Not saved', 'error', ' · changed elsewhere');
                 } else if (rejected) {
                     retryAttempt = -1;
-                    updateSaveStatus('Not saved', 'error', ' · wrong passphrase for this note');
+                    updateSaveStatus('Not saved', 'error', lastStatus === 413
+                        ? ' · note too large, shorten it'
+                        : ' · wrong passphrase for this note');
                 } else if (dirty && sessionActive) {
                     const delay = failed
                         ? SAVE_RETRY_BACKOFF[retryAttempt = Math.min(retryAttempt + 1, SAVE_RETRY_BACKOFF.length - 1)]

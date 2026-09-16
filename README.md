@@ -98,7 +98,7 @@ Paper/
 | `DATA_DIR` | `/var/lib/paper` (deploy) / `/tmp` (local run) | Storage directory |
 | `AGE_LIMIT_DAYS` | `2` | Days before auto-delete |
 | `MAX_TOTAL_SIZE_MB` | `100` | Max storage size |
-| `MAX_CONTENT_SIZE_MB` | `10` | Max note size |
+| `MAX_CONTENT_SIZE_MB` | `1` | Max note size, encrypted + base64 (1 MB ≈ 750 KB of text) |
 | `CLEANUP_INTERVAL_MINUTES` | `15` | Background cleanup interval |
 | `CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins; empty = CORS disabled |
 | `RATE_LIMIT_SAVE_PER_MIN` | `60` | `/api/save` requests per client per minute; `0` disables |
@@ -168,9 +168,9 @@ IPv6 clients are grouped by `/64`, so rotating addresses within one allocation
 doesn't dodge the limit. Limiter memory is bounded (100k tracked clients; idle
 ones are swept); past that, new clients are let through rather than locked out.
 
-Rate limiting slows abuse, it doesn't cap it: many IPs, or big notes, can still
-fill the `MAX_TOTAL_SIZE_MB` budget, after which saves get `507` until cleanup.
-Lowering `MAX_CONTENT_SIZE_MB` makes that much slower.
+Rate limiting slows abuse, it doesn't cap it: many IPs can still fill the
+`MAX_TOTAL_SIZE_MB` budget, after which saves get `507` until cleanup. The 1 MB
+note cap keeps that slow — 100 MB takes 100 distinct full-size notes.
 
 ## Security Notes
 
