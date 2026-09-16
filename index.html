@@ -6,11 +6,30 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Paper</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
-        rel="stylesheet">
+    <link rel="preload" href="/fonts/plus-jakarta-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
     <style>
+        /* Self-hosted (fonts/, SIL OFL 1.1): no third-party requests. */
+        @font-face {
+            font-family: 'Plus Jakarta Sans';
+            font-style: normal;
+            font-display: swap;
+            font-weight: 200 800;
+            src: url(/fonts/plus-jakarta-sans-latin-ext-wght-normal.woff2) format('woff2-variations');
+            unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+                U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F,
+                U+A720-A7FF;
+        }
+
+        @font-face {
+            font-family: 'Plus Jakarta Sans';
+            font-style: normal;
+            font-display: swap;
+            font-weight: 200 800;
+            src: url(/fonts/plus-jakarta-sans-latin-wght-normal.woff2) format('woff2-variations');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+                U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
         :root {
             /* --- Colorful & Playful DARK --- */
             --bg-primary: #0f0f1a;
@@ -19,7 +38,7 @@
             --bg-card: rgba(25, 25, 45, 0.95);
             --text-primary: #ffffff;
             --text-secondary: #b8b8d0;
-            --text-muted: #7070a0;
+            --text-muted: #8a8ab8; /* >= 4.5:1 on the card background */
             --accent-pink: #ff6b9d;
             --accent-purple: #a855f7;
             --accent-blue: #3b82f6;
@@ -30,11 +49,13 @@
             --warning: #f59e0b;
             --error: #ef4444;
             --border: rgba(168, 85, 247, 0.25);
+            --focus-ring: 0 0 0 3px rgba(168, 85, 247, 0.6);
             --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.3);
             --shadow-glow: 0 8px 40px rgba(168, 85, 247, 0.15);
             --radius: 24px;
             --radius-sm: 16px;
-            --transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            --transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease,
+                box-shadow 0.2s ease, transform 0.2s ease;
         }
 
         * {
@@ -43,12 +64,9 @@
             box-sizing: border-box;
         }
 
-        html,
         body {
-            height: 100%;
-        }
-
-        body {
+            min-height: 100vh;
+            min-height: 100dvh;
             font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
             background: linear-gradient(135deg, #0f0f1a 0%, #1a1025 50%, #0f1520 100%);
             background-attachment: fixed;
@@ -73,6 +91,11 @@
             z-index: 1;
         }
 
+        /* Keep the writing surface still: no background drift while editing */
+        body.editing::before {
+            animation: none;
+        }
+
         @keyframes floatBg {
 
             0%,
@@ -89,12 +112,35 @@
             }
         }
 
+        button {
+            font-family: inherit;
+        }
+
+        :focus-visible {
+            outline: none;
+            box-shadow: var(--focus-ring);
+        }
+
+        .visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+            clip: rect(0 0 0 0);
+            white-space: nowrap;
+        }
+
+        [hidden] {
+            display: none !important;
+        }
+
         /* Login Screen */
         .login-screen {
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100%;
+            min-height: 100vh;
+            min-height: 100dvh;
             padding: 20px;
             position: relative;
             z-index: 2;
@@ -133,7 +179,7 @@
         .card-front {
             position: relative;
             z-index: 2;
-            animation: bounceIn 0.6s var(--transition);
+            animation: bounceIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
 
         .card-back {
@@ -144,6 +190,9 @@
             bottom: 0;
             transform: rotateY(180deg);
             z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
 
         @keyframes bounceIn {
@@ -162,106 +211,142 @@
             }
         }
 
-        .login-box h1 {
-            margin-bottom: 12px;
+        .card-front h1 {
+            margin-bottom: 4px;
             font-weight: 800;
             font-size: 42px;
+            line-height: 1.2;
             letter-spacing: -1px;
-            font-family: 'Plus Jakarta Sans', sans-serif;
             background: var(--gradient-primary);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
 
-        .login-box h1::after {
+        .card-front h1::after {
             content: ' ✨';
             -webkit-text-fill-color: initial;
         }
 
+        .mode-badge {
+            display: inline-block;
+            margin-bottom: 12px;
+            padding: 3px 12px;
+            border-radius: 50px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+
+        .mode-badge.new {
+            color: var(--accent-yellow);
+            border-color: rgba(251, 191, 36, 0.4);
+        }
+
         .login-subtitle {
             color: var(--text-secondary);
-            font-size: 16px;
-            margin-bottom: 32px;
+            font-size: 15px;
+            margin-bottom: 24px;
             font-weight: 500;
             line-height: 1.6;
         }
 
-        /* Info Icon & Card Back */
-        .info-icon {
+        /* Link box: shown for a brand-new note, since the link is the only way back */
+        .link-box {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .link-box-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--accent-yellow);
+            margin-bottom: 6px;
+        }
+
+        .link-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .link-field {
+            flex: 1;
+            min-width: 0;
+            padding: 10px 12px;
+            font-size: 13px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            color: var(--text-secondary);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            text-overflow: ellipsis;
+        }
+
+        /* Info / close buttons */
+        .icon-btn {
             position: absolute;
             top: 16px;
             right: 16px;
-            width: 28px;
-            height: 28px;
+            width: 32px;
+            height: 32px;
             border-radius: 50%;
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
-            color: var(--text-muted);
-            font-size: 14px;
+            color: var(--text-secondary);
+            font-size: 15px;
             font-weight: 600;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: var(--transition);
-            font-family: serif;
+            line-height: 1;
             z-index: 5;
+        }
+
+        .info-icon {
+            font-family: Georgia, serif;
+            font-style: italic;
+        }
+
+        .back-icon {
+            font-size: 20px;
+            font-weight: 400;
         }
 
         .info-icon:hover {
             background: var(--accent-purple);
             color: white;
             border-color: var(--accent-purple);
-            transform: scale(1.1);
-        }
-
-        .back-icon {
-            position: absolute;
-            top: 16px;
-            right: 16px;
-            width: 28px;
-            height: 28px;
-            border-radius: 50%;
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border);
-            color: var(--text-muted);
-            font-size: 18px;
-            font-weight: 300;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: var(--transition);
-            line-height: 1;
         }
 
         .back-icon:hover {
             background: var(--accent-pink);
             color: white;
             border-color: var(--accent-pink);
-            transform: scale(1.1);
         }
 
         .info-title {
             font-size: 22px;
             font-weight: 700;
             color: var(--text-primary);
-            margin-bottom: 20px;
-            background: var(--gradient-primary);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            margin-bottom: 16px;
         }
 
         .info-list {
             list-style: none;
-            padding: 0;
-            margin: 0 0 24px 0;
+            padding: 0 8px 0 0;
+            margin: 0 0 20px 0;
             text-align: left;
-            max-height: 200px;
+            flex: 1;
+            min-height: 0;
             overflow-y: auto;
-            padding-right: 8px;
+            align-self: stretch;
         }
 
         /* Info list scrollbar */
@@ -279,16 +364,11 @@
             border-radius: 6px;
         }
 
-        .info-list::-webkit-scrollbar-thumb:hover {
-            background: var(--gradient-hover);
-        }
-
         .info-list li {
             color: var(--text-secondary);
             font-size: 13px;
             line-height: 1.7;
-            padding: 10px 0;
-            padding-left: 24px;
+            padding: 10px 0 10px 24px;
             position: relative;
             border-bottom: 1px solid var(--border);
         }
@@ -330,13 +410,12 @@
         }
 
         .input-group {
-            position: relative;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
 
         .password-input {
             width: 100%;
-            padding: 18px 24px;
+            padding: 18px 16px;
             font-size: 17px;
             border: 2px solid var(--border);
             border-radius: var(--radius-sm);
@@ -350,11 +429,11 @@
             font-weight: 600;
         }
 
-        .password-input:focus {
+        .password-input:focus,
+        .password-input:focus-visible {
             border-color: var(--accent-purple);
             box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.25), 0 0 30px rgba(168, 85, 247, 0.15);
             background: var(--bg-tertiary);
-            transform: scale(1.02);
         }
 
         .password-input::placeholder {
@@ -362,6 +441,49 @@
             letter-spacing: normal;
             font-family: 'Plus Jakarta Sans', sans-serif;
             font-weight: 500;
+        }
+
+        /* Passphrase strength hint (new notes only) */
+        .strength {
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-align: left;
+        }
+
+        .strength-bar {
+            flex: 1;
+            height: 4px;
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+            overflow: hidden;
+        }
+
+        .strength-fill {
+            height: 100%;
+            width: 0;
+            border-radius: 4px;
+            background: var(--error);
+            transition: width 0.2s ease, background-color 0.2s ease;
+        }
+
+        .strength[data-level="weak"] .strength-fill {
+            width: 25%;
+            background: var(--error);
+        }
+
+        .strength[data-level="ok"] .strength-fill {
+            width: 60%;
+            background: var(--warning);
+        }
+
+        .strength[data-level="strong"] .strength-fill {
+            width: 100%;
+            background: var(--success);
         }
 
         .enter-btn {
@@ -375,22 +497,23 @@
             font-weight: 700;
             cursor: pointer;
             transition: var(--transition);
-            position: relative;
-            overflow: hidden;
             text-transform: uppercase;
             letter-spacing: 1.5px;
-            font-family: 'Plus Jakarta Sans', sans-serif;
             box-shadow: 0 6px 25px rgba(255, 107, 157, 0.35);
         }
 
         .enter-btn:hover:not(:disabled) {
-            transform: translateY(-3px) scale(1.02);
+            transform: translateY(-2px);
             box-shadow: 0 10px 35px rgba(255, 107, 157, 0.45);
             background: var(--gradient-hover);
         }
 
         .enter-btn:active {
-            transform: translateY(0) scale(0.98);
+            transform: translateY(0);
+        }
+
+        .enter-btn:focus-visible {
+            box-shadow: var(--focus-ring), 0 6px 25px rgba(255, 107, 157, 0.35);
         }
 
         .enter-btn:disabled {
@@ -399,134 +522,201 @@
             transform: none;
         }
 
+        .pill-btn {
+            padding: 8px 16px;
+            border-radius: 50px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border: 2px solid var(--border);
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            transition: var(--transition);
+            white-space: nowrap;
+        }
+
+        .pill-btn:hover {
+            color: white;
+            background: var(--accent-purple);
+            border-color: var(--accent-purple);
+        }
+
+        .text-btn {
+            margin-top: 18px;
+            background: none;
+            border: none;
+            border-radius: 6px;
+            padding: 2px 6px;
+            color: var(--accent-blue);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .text-btn:hover {
+            text-decoration: underline;
+        }
+
         .error {
             color: var(--error);
-            margin-top: 16px;
+            margin-top: 12px;
             font-size: 14px;
-            min-height: 20px;
             font-weight: 500;
+        }
+
+        .error:empty {
+            margin-top: 0;
         }
 
         /* Editor Screen */
         .editor-screen {
             display: none;
-            height: 100%;
-            background: transparent;
+            height: 100vh;
+            height: 100dvh;
             flex-direction: column;
             position: relative;
             z-index: 2;
         }
 
         .header {
-            padding: 16px 24px;
+            padding: 14px 24px;
             background: var(--bg-card);
             border-bottom: 2px solid var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            backdrop-filter: blur(10px);
-            position: relative;
+            gap: 12px;
             flex-shrink: 0;
-        }
-
-        .header-left {
-            display: flex;
-            align-items: center;
-            gap: 16px;
         }
 
         .app-title {
             font-size: 26px;
             font-weight: 800;
-            font-family: 'Plus Jakarta Sans', sans-serif;
             letter-spacing: -0.5px;
             background: var(--gradient-primary);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
-            cursor: pointer;
-            transition: var(--transition);
-        }
-
-        .app-title:hover {
-            transform: scale(1.05);
         }
 
         .header-right {
             display: flex;
             align-items: center;
-            gap: 12px;
-            flex-wrap: wrap;
+            gap: 10px;
+            min-width: 0;
         }
 
         .save-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
             font-size: 12px;
             font-weight: 700;
-            padding: 10px 18px;
+            padding: 8px 14px;
             border-radius: 50px;
             background: var(--bg-tertiary);
             color: var(--text-secondary);
             border: 2px solid var(--border);
-            min-width: 90px;
-            text-align: center;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            white-space: nowrap;
             transition: var(--transition);
         }
 
-        .save-status.saving {
-            background: var(--gradient-primary);
-            color: white;
-            border-color: transparent;
-            box-shadow: 0 4px 20px rgba(168, 85, 247, 0.3);
-            animation: wiggle 0.5s ease-in-out infinite;
+        .save-status::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            flex-shrink: 0;
         }
 
-        @keyframes wiggle {
+        .save-status.pending::before {
+            background: var(--accent-purple);
+        }
 
-            0%,
-            100% {
-                transform: rotate(-2deg);
-            }
-
-            50% {
-                transform: rotate(2deg);
-            }
+        .save-status.saving::before {
+            background: var(--accent-purple);
+            animation: pulse 1s ease-in-out infinite;
         }
 
         .save-status.saved {
-            background: linear-gradient(135deg, var(--success) 0%, #10b981 100%);
-            color: white;
-            border-color: transparent;
-            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.3);
+            color: var(--success);
+            border-color: rgba(34, 197, 94, 0.35);
+        }
+
+        .save-status.saved::before {
+            background: var(--success);
+        }
+
+        .save-status.error {
+            color: #fecaca;
+            background: rgba(239, 68, 68, 0.15);
+            border-color: var(--error);
+        }
+
+        .save-status.error::before {
+            background: var(--error);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        /* Shown when a save lost a race with another tab or device */
+        .conflict-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px 16px;
+            padding: 10px 24px;
+            background: rgba(239, 68, 68, 0.15);
+            border-bottom: 2px solid var(--error);
+            color: #fecaca;
+            font-size: 13px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .conflict-actions {
+            display: flex;
+            gap: 8px;
         }
 
         .word-count {
-            font-size: 14px;
+            font-size: 13px;
             color: var(--text-secondary);
             font-weight: 600;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            background: var(--bg-tertiary);
-            padding: 6px 14px;
-            border-radius: 20px;
+            white-space: nowrap;
         }
 
         .editor-container {
             flex: 1;
-            position: relative;
+            min-height: 0;
             margin: 20px;
             border-radius: var(--radius);
             background: var(--bg-card);
             border: 2px solid var(--border);
             box-shadow: var(--shadow-soft);
-            animation: paperUnfold 0.5s ease-out;
+            animation: paperUnfold 0.4s ease-out;
         }
 
         .editor {
+            display: block;
             width: 100%;
             height: 100%;
-            padding: 28px 32px;
+            /* Readable measure: text column caps at ~75ch, scrollbar stays at the edge */
+            padding: 28px max(32px, calc((100% - 75ch) / 2));
             border: none;
             outline: none;
             font-family: 'Plus Jakarta Sans', sans-serif;
@@ -536,18 +726,18 @@
             resize: none;
             background: transparent;
             color: var(--text-primary);
-            position: relative;
-            z-index: 2;
             border-radius: var(--radius);
             caret-color: var(--accent-purple);
         }
 
-        .editor::placeholder {
-            color: var(--text-muted);
-            font-weight: 500;
+        .editor:focus-visible {
+            box-shadow: none;
         }
 
-        /* Scrollbar styling */
+        .editor::placeholder {
+            color: var(--text-muted);
+        }
+
         .editor::-webkit-scrollbar {
             width: 10px;
         }
@@ -562,76 +752,22 @@
             border-radius: 10px;
         }
 
-        .editor::-webkit-scrollbar-thumb:hover {
-            background: var(--gradient-hover);
-        }
-
-        /* Animation for mode switching */
-        .fade-in {
-            animation: fadeIn 0.4s ease-out;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px) scale(0.98);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
-        }
-
-        /* Focus improvements */
-        .password-input:focus,
-        .editor:focus {
-            outline: none;
-        }
-
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translateY(30px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
         @keyframes paperUnfold {
             from {
                 opacity: 0;
-                transform: scale(0.95) rotateX(5deg);
+                transform: scale(0.98);
             }
 
             to {
                 opacity: 1;
-                transform: scale(1) rotateX(0deg);
+                transform: scale(1);
             }
-        }
-
-        /* Texture overlay for paper feel */
-        .editor-container::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: var(--paper-texture);
-            opacity: 0.1;
-            pointer-events: none;
-            z-index: 1;
-            border-radius: var(--radius);
         }
 
         /* Mobile Responsive */
         @media (max-width: 600px) {
             .header {
-                padding: 12px 16px;
+                padding: 10px 12px;
                 gap: 8px;
             }
 
@@ -640,20 +776,35 @@
             }
 
             .header-right {
-                flex-wrap: nowrap;
-                gap: 8px;
+                gap: 6px;
             }
 
-            .save-status {
-                font-size: 10px;
-                padding: 6px 12px;
-                min-width: 70px;
-                letter-spacing: 0;
+            .wc-chars {
+                display: none;
             }
 
             .word-count {
                 font-size: 11px;
-                padding: 4px 10px;
+            }
+
+            .pill-btn {
+                padding: 6px 10px;
+                font-size: 10px;
+                letter-spacing: 0;
+            }
+
+            .save-status {
+                font-size: 10px;
+                padding: 6px 10px;
+            }
+
+            .status-detail {
+                display: none;
+            }
+
+            .conflict-bar {
+                padding: 10px 12px;
+                font-size: 12px;
             }
 
             .editor-container {
@@ -676,27 +827,41 @@
 
             .login-subtitle {
                 font-size: 14px;
-                margin-bottom: 24px;
-            }
-
-            .info-list {
-                margin-bottom: 16px;
+                margin-bottom: 20px;
             }
 
             .info-list li {
-                font-size: 13px;
-                padding: 6px 0;
-                padding-left: 20px;
+                padding: 6px 0 6px 20px;
             }
 
             .info-title {
-                font-size: 16px;
+                font-size: 18px;
                 margin-bottom: 12px;
             }
+        }
 
-            .info-link {
-                font-size: 11px;
-                padding: 8px 12px;
+        /* Very narrow phones: the status dot alone carries the state */
+        @media (max-width: 380px) {
+            .word-count {
+                display: none;
+            }
+
+            .save-status .status-text {
+                display: none;
+            }
+
+            .save-status.error .status-text {
+                display: inline;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+
+            *,
+            *::before,
+            *::after {
+                animation: none !important;
+                transition: none !important;
             }
         }
     </style>
@@ -707,39 +872,55 @@
         <div id="cardContainer" class="card-container">
             <div class="card-inner">
                 <!-- Front: Login -->
-                <div class="card-front">
-                    <div class="info-icon" onclick="flipCard()" title="Learn more">i</div>
+                <div id="cardFront" class="card-front">
+                    <button type="button" id="infoIcon" class="icon-btn info-icon" aria-label="About Paper"
+                        title="About Paper">i</button>
                     <h1>Paper</h1>
-                    <p class="login-subtitle">Perfect for temporary notes and secure sharing. Deleted after two days.
-                    </p>
+                    <span id="modeBadge" class="mode-badge">Existing note</span>
+                    <p id="loginSubtitle" class="login-subtitle"></p>
 
-                    <div class="input-group">
-                        <input type="password" id="passwordInput" class="password-input"
-                            placeholder="min-8-char password" minlength="8" maxlength="100">
+                    <div id="linkBox" class="link-box" hidden>
+                        <label for="linkField" class="link-box-label">⚠ Save this link — it's the only way back</label>
+                        <div class="link-row">
+                            <input id="linkField" class="link-field" type="text" readonly>
+                            <button type="button" id="loginCopyBtn" class="pill-btn">Copy</button>
+                        </div>
                     </div>
 
-                    <button onclick="login()" class="enter-btn">Enter</button>
-                    <div id="loginError" class="error"></div>
+                    <div class="input-group">
+                        <label for="passwordInput" class="visually-hidden">Passphrase</label>
+                        <input type="password" id="passwordInput" class="password-input"
+                            placeholder="passphrase" minlength="8" maxlength="100"
+                            autocomplete="current-password" aria-describedby="strengthText loginError">
+                        <div id="strength" class="strength" hidden>
+                            <div class="strength-bar"><div class="strength-fill"></div></div>
+                            <span id="strengthText" aria-live="polite"></span>
+                        </div>
+                    </div>
+
+                    <button type="button" id="enterBtn" class="enter-btn">Unlock</button>
+                    <button type="button" id="newNoteLink" class="text-btn">↻ start a new note</button>
+                    <div id="loginError" class="error" role="alert" aria-live="polite"></div>
                 </div>
 
                 <!-- Back: Info -->
-                <div class="card-back">
-                    <div class="back-icon" onclick="flipCard()" title="Back to login">X</div>
-                    <h3 class="info-title">About Paper ✨</h3>
+                <div id="cardBack" class="card-back" inert>
+                    <button type="button" id="backIcon" class="icon-btn back-icon" aria-label="Close"
+                        title="Close">&times;</button>
+                    <h2 class="info-title">About Paper</h2>
                     <ul class="info-list">
-                        <li><strong>What is it?</strong> A secure notepad for temporary notes you can access from
-                            anywhere.</li>
-                        <li><strong>Encryption:</strong> Notes encrypted client-side with your password. Never sent to
-                            server.</li>
-                        <li><strong>Open Source:</strong> 100% open. Deployed on Hugging Face, Open for everyone to see.
-                        </li>
-                        <li><strong>Zero Access:</strong> Even the developer cannot read your notes. Only encrypted
-                            blobs stored.</li>
-                        <li><strong>Auto-Delete:</strong> Notes automatically deleted after 2 days of inactivity.</li>
-                        <li><strong>Pro tip:</strong> Use a strong password! If someone guesses it... well, that's on
-                            you 😅</li>
+                        <li><strong>What is it?</strong> A private scratchpad. Each note lives at its own random,
+                            unguessable link and is locked with your passphrase.</li>
+                        <li><strong>Encryption:</strong> Notes are encrypted in your browser. Your passphrase and
+                            the readable text never leave your device — the server only stores encrypted data.</li>
+                        <li><strong>Zero Access:</strong> Even the developer cannot read your notes.</li>
+                        <li><strong>Auto-Delete:</strong> Notes are deleted after 2 days of inactivity.</li>
+                        <li><strong>No recovery:</strong> Lose the link or the passphrase and the note is gone.
+                            Use a long passphrase — 16+ characters.</li>
+                        <li><strong>Open Source:</strong> Every line is public on GitHub.</li>
                     </ul>
-                    <a href="https://github.com/jebin2/Paper" target="_blank" class="info-link">
+                    <a href="https://github.com/jebin2/Paper" target="_blank" rel="noopener noreferrer"
+                        class="info-link">
                         🔗 View source on GitHub
                     </a>
                 </div>
@@ -748,296 +929,34 @@
     </div>
 
     <div id="editorScreen" class="editor-screen">
-        <div class="header">
-            <div class="header-left">
-                <div class="app-title" onclick="goToLogin()" style="cursor: pointer;" title="Go to login">Paper</div>
-            </div>
+        <header class="header">
+            <div class="app-title">Paper</div>
             <div class="header-right">
-                <div id="wordCount" class="word-count">0 words</div>
-                <div id="saveStatus" class="save-status">Ready</div>
+                <div id="wordCount" class="word-count"><span class="wc-words">0 words</span><span
+                        class="wc-chars"></span></div>
+                <button type="button" id="copyLinkBtn" class="pill-btn" title="Copy the link to this note">Copy
+                    link</button>
+                <button type="button" id="lockBtn" class="pill-btn" title="Lock this note">Lock</button>
+                <div id="saveStatus" class="save-status" role="status"><span class="status-text">Ready</span><span
+                        class="status-detail"></span></div>
+            </div>
+        </header>
+        <div id="conflictBar" class="conflict-bar" role="alert" hidden>
+            <span>This note was changed in another tab or device, so your latest edits weren't saved.</span>
+            <div class="conflict-actions">
+                <button type="button" id="loadLatestBtn" class="pill-btn"
+                    title="Discard your unsaved edits here and show the latest version">Load latest</button>
+                <button type="button" id="keepMineBtn" class="pill-btn"
+                    title="Replace the latest version with what's in this editor">Overwrite with mine</button>
             </div>
         </div>
         <div class="editor-container">
+            <label for="editor" class="visually-hidden">Note</label>
             <textarea id="editor" class="editor" placeholder="Start typing..."></textarea>
         </div>
     </div>
 
-    <script>
-        let currentPassword = '';
-        let currentSalt = null;
-        let fileHash = '';
-        let saveTimeout = null;
-        let isWorking = false;
-
-        const PBKDF2_ITERATIONS = 250000;
-
-        // --- CARD FLIP ---
-        function flipCard() {
-            const container = document.getElementById('cardContainer');
-            container.classList.toggle('flipped');
-        }
-
-        // --- WORD COUNT ---
-        function updateWordCount() {
-            const text = document.getElementById('editor').value;
-            const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-            const chars = text.length;
-            document.getElementById('wordCount').textContent = `${words} words, ${chars} chars`;
-        }
-
-        // --- CRYPTOGRAPHY (unchanged) ---
-        async function generateFilenameHash(password) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(password);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
-        }
-
-        async function deriveKey(password, salt) {
-            const encoder = new TextEncoder();
-            const keyMaterial = await crypto.subtle.importKey(
-                'raw',
-                encoder.encode(password),
-                { name: 'PBKDF2' },
-                false,
-                ['deriveKey']
-            );
-            return crypto.subtle.deriveKey(
-                {
-                    name: 'PBKDF2',
-                    salt: salt,
-                    iterations: PBKDF2_ITERATIONS,
-                    hash: 'SHA-256'
-                },
-                keyMaterial,
-                { name: 'AES-GCM', length: 256 },
-                true,
-                ['encrypt', 'decrypt']
-            );
-        }
-
-        async function encrypt(text, key) {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(text);
-            const iv = crypto.getRandomValues(new Uint8Array(12));
-
-            const encryptedContent = await crypto.subtle.encrypt(
-                { name: 'AES-GCM', iv: iv },
-                key,
-                data
-            );
-
-            const combined = new Uint8Array(iv.length + encryptedContent.byteLength);
-            combined.set(iv);
-            combined.set(new Uint8Array(encryptedContent), iv.length);
-
-            return btoa(String.fromCharCode.apply(null, combined));
-        }
-
-        async function decrypt(encryptedBase64, key) {
-            try {
-                const combined = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
-                const iv = combined.slice(0, 12);
-                const encryptedContent = combined.slice(12);
-
-                const decrypted = await crypto.subtle.decrypt(
-                    { name: 'AES-GCM', iv: iv },
-                    key,
-                    encryptedContent
-                );
-
-                return new TextDecoder().decode(decrypted);
-            } catch (error) {
-                console.error('Decryption failed:', error);
-                throw new Error('Decryption failed. Check password.');
-            }
-        }
-
-        function base64ToUint8Array(base64) {
-            const binaryString = atob(base64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            return bytes;
-        }
-
-        // --- APPLICATION LOGIC ---
-        document.getElementById('passwordInput').focus();
-        document.getElementById('passwordInput').addEventListener('keypress', e => {
-            if (e.key === 'Enter') login();
-        });
-
-        // iOS Safari viewport fix
-        function fixIOSViewport() {
-            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-            if (isIOS) {
-                const vh = window.innerHeight * 0.01;
-                document.documentElement.style.setProperty('--vh', `${vh}px`);
-
-                window.addEventListener('resize', () => {
-                    const vh = window.innerHeight * 0.01;
-                    document.documentElement.style.setProperty('--vh', `${vh}px`);
-                });
-            }
-        }
-
-        // Call on page load
-        fixIOSViewport();
-
-        async function login() {
-            if (isWorking) return;
-            isWorking = true;
-
-            const password = document.getElementById('passwordInput').value;
-            const errorDiv = document.getElementById('loginError');
-            const enterBtn = document.querySelector('.enter-btn');
-
-            errorDiv.textContent = '';
-            if (password.length < 8) {
-                errorDiv.textContent = 'Password must be at least 8 characters';
-                isWorking = false;
-                return;
-            }
-
-            enterBtn.textContent = 'Loading...';
-            enterBtn.disabled = true;
-
-            currentPassword = password;
-            fileHash = await generateFilenameHash(password);
-
-            try {
-                const response = await fetch('/api/load', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ hash: fileHash })
-                });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Login failed');
-                }
-
-                currentSalt = base64ToUint8Array(data.salt);
-
-                let content = '';
-                if (data.content) {
-                    const key = await deriveKey(currentPassword, currentSalt);
-                    content = await decrypt(data.content, key);
-                }
-
-                document.getElementById('editor').value = content;
-                document.getElementById('loginScreen').style.display = 'none';
-                document.getElementById('editorScreen').style.display = 'flex';
-                setupAutoSave();
-                updateSaveStatus('Ready');
-                updateWordCount();
-
-            } catch (error) {
-                errorDiv.textContent = error.message.includes('Decryption') ? 'Invalid password' : 'Connection error';
-            } finally {
-                isWorking = false;
-                enterBtn.textContent = 'Enter';
-                enterBtn.disabled = false;
-            }
-        }
-
-        function setupAutoSave() {
-            const editor = document.getElementById('editor');
-
-            editor.addEventListener('input', () => {
-                clearTimeout(saveTimeout);
-                updateSaveStatus('Typing...');
-                updateWordCount();
-
-                saveTimeout = setTimeout(saveContent, 1500);
-            });
-        }
-
-        async function saveContent() {
-            if (isWorking) return;
-            isWorking = true;
-
-            updateSaveStatus('Saving...');
-
-            const content = document.getElementById('editor').value;
-
-            try {
-                const key = await deriveKey(currentPassword, currentSalt);
-                const encryptedContent = await encrypt(content, key);
-
-                const response = await fetch('/api/save', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        hash: fileHash,
-                        content: encryptedContent
-                    })
-                });
-
-                if (response.ok) {
-                    updateSaveStatus('Saved');
-                } else {
-                    const data = await response.json();
-                    updateSaveStatus(`Error: ${data.error || 'Save failed'}`);
-                }
-            } catch (error) {
-                console.error('Save failed:', error);
-                updateSaveStatus('Save failed');
-            } finally {
-                isWorking = false;
-            }
-        }
-
-        function goToLogin() {
-            const statusDiv = document.getElementById('saveStatus');
-            // Check if there are unsaved changes
-            if (!statusDiv.className.includes('saved')) {
-                if (!confirm('You have unsaved changes. Are you sure you want to leave?')) {
-                    return;
-                }
-            }
-
-            // Clear sensitive data
-            currentPassword = '';
-            currentSalt = null;
-            fileHash = '';
-            clearTimeout(saveTimeout);
-
-            // Reset UI
-            document.getElementById('editor').value = '';
-            document.getElementById('passwordInput').value = '';
-            document.getElementById('loginError').textContent = '';
-            document.getElementById('editorScreen').style.display = 'none';
-            document.getElementById('loginScreen').style.display = 'flex';
-            document.getElementById('passwordInput').focus();
-        }
-
-        function updateSaveStatus(status) {
-            const statusDiv = document.getElementById('saveStatus');
-            statusDiv.textContent = status;
-
-            statusDiv.className = 'save-status';
-            if (status.includes('Saving') || status.includes('Typing')) {
-                statusDiv.className += ' saving';
-            } else if (status === 'Saved') {
-                statusDiv.className += ' saved';
-            }
-        }
-
-        // Prevent accidental page close
-        window.addEventListener('beforeunload', function (e) {
-            const statusDiv = document.getElementById('saveStatus');
-            // Check if there are unsaved changes
-            if (!statusDiv.className.includes('saved')) {
-                e.preventDefault();
-                e.returnValue = '';
-            }
-        });
-    </script>
+    <script src="/app.js"></script>
 </body>
 
 </html>

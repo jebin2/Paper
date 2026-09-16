@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,13 +25,13 @@ import (
 
 // --- CONFIGURATION (Environment Variables with Defaults) ---
 var (
-	dataDir          = getenv("DATA_DIR", "/tmp")
+	dataDir          = getenv("DATA_DIR", "/var/lib/paper")
 	maxTotalSizeMB   = getenvInt("MAX_TOTAL_SIZE_MB", 100)
 	purgeToSizeMB    = getenvInt("PURGE_TO_SIZE_MB", 80)
 	ageLimitDays     = getenvInt("AGE_LIMIT_DAYS", 2)
 	maxContentSizeMB = getenvInt("MAX_CONTENT_SIZE_MB", 10)
 	cleanupInterval  = time.Duration(getenvInt("CLEANUP_INTERVAL_MINUTES", 15)) * time.Minute
-	corsOrigins      = getenv("CORS_ORIGINS", "*")
+	corsOrigins      = getenv("CORS_ORIGINS", "")
 	staticDir        = getenv("STATIC_DIR", "")
 	listenAddr       = getenv("LISTEN_ADDR", "0.0.0.0")
 	listenPort       = getenv("LISTEN_PORT", "7860")
@@ -38,8 +40,15 @@ var (
 )
 
 var (
-	hashRe    = regexp.MustCompile(`^[0-9a-f]{16}$`)
+	// Note IDs are random 128-bit capability links: exactly 32 lowercase hex chars.
+	hashRe    = regexp.MustCompile(`^[0-9a-f]{32}$`)
 	storageMu sync.Mutex // serializes save + cleanup so cleanup never deletes a freshly-saved note
+
+	// usedBytes is the current total size of stored content files, maintained
+	// under storageMu. It is the write budget: saves that would push the store
+	// past MAX_TOTAL_SIZE_MB are rejected instead of letting the disk grow
+	// unbounded between background cleanups.
+	usedBytes int64
 )
 
 func getenv(key, def string) string {
@@ -79,6 +88,9 @@ func validateConfig() error {
 
 // --- CORS ---
 func applyCORS(w http.ResponseWriter, r *http.Request) bool {
+	if corsOrigins == "" {
+		return true
+	}
 	allowed := "*"
 	if corsOrigins != "*" {
 		origin := r.Header.Get("Origin")
@@ -106,6 +118,30 @@ func applyCORS(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // --- SECURITY ---
+// applySecurityHeaders sets a strict set of browser security headers on every
+// response. The frontend runs client-side crypto (PBKDF2/AES in JS), so an XSS
+// here would expose the plaintext note and password; the CSP keeps any injected
+// script from running. The app's JS lives in /app.js so script-src 'self' needs
+// no 'unsafe-inline'. Fonts are self-hosted, so no third party ever learns who
+// opened Paper.
+func applySecurityHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Security-Policy",
+		"default-src 'none'; "+
+			"script-src 'self'; "+
+			"style-src 'self' 'unsafe-inline'; "+
+			"font-src 'self'; "+
+			"connect-src 'self'; "+
+			"img-src 'self' data:; "+
+			"object-src 'none'; frame-src 'none'; frame-ancestors 'none'; "+
+			"base-uri 'self'; form-action 'self'; upgrade-insecure-requests")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), interest-cohort=()")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
+}
+
 func sanitizeHash(hash string) bool {
 	return hashRe.MatchString(hash)
 }
@@ -163,51 +199,79 @@ func atomicWrite(path string, data string) error {
 	return nil
 }
 
-// ensureSalt returns the note's salt, creating it if it doesn't exist.
-//
-// Callers hold storageMu, so no other goroutine can create the salt between
-// the existence check and the write — a plain check-then-create is safe.
-// atomicWrite keeps the creation crash-safe: a reader never sees a
-// partially-written salt.
-func ensureSalt(saltPath string) (string, error) {
-	if got, err := os.ReadFile(saltPath); err == nil {
-		return string(got), nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
+// Each note is three files. Content is written last on creation, so its
+// existence is what makes a note exist; the salt and write-token digest are
+// sidecars that cleanup reclaims if they are ever orphaned.
+const (
+	contentSuffix = "_content.txt"
+	saltSuffix    = "_salt.txt"
+	authSuffix    = "_auth.txt"
+)
 
-	saltBytes := make([]byte, 16)
-	if _, err := rand.Read(saltBytes); err != nil {
-		return "", err
-	}
-	salt := base64.StdEncoding.EncodeToString(saltBytes)
+var sidecarSuffixes = []string{saltSuffix, authSuffix}
 
-	if err := atomicWrite(saltPath, salt); err != nil {
-		return "", err
-	}
-	return salt, nil
+const (
+	saltBytes  = 16 // client-chosen PBKDF2 salt
+	tokenBytes = 32 // client-derived write token (never the encryption key)
+)
+
+func notePath(hash, suffix string) string {
+	return filepath.Join(dataDir, hash+suffix)
+}
+
+// decodeFixed decodes standard base64 and requires exactly n bytes.
+func decodeFixed(s string, n int) ([]byte, bool) {
+	b, err := base64.StdEncoding.DecodeString(s)
+	return b, err == nil && len(b) == n
+}
+
+// contentVersion identifies one stored revision of a note. Saves must name the
+// version they were based on, so a stale tab can't silently overwrite newer
+// edits made elsewhere. Hashing the ciphertext needs no extra state on disk.
+func contentVersion(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:16])
+}
+
+// tokenDigest is what the server stores for a write token. The token itself is
+// never written to disk, so a leaked data dir can't be used to overwrite notes.
+func tokenDigest(token []byte) string {
+	sum := sha256.Sum256(token)
+	return hex.EncodeToString(sum[:])
 }
 
 // cleanupFiles removes files older than the age limit, and if total size still
 // exceeds the cap, deletes the oldest remaining files until under the purge
-// threshold. Guarded by storageMu so it can never race a save.
+// threshold. It also reclaims orphaned sidecar files (a salt or write-token
+// digest whose note is gone is useless and would otherwise accumulate) and
+// stale temp files abandoned by a crash. It refreshes usedBytes, the write
+// budget consulted on every save. Guarded by storageMu so it can never race a
+// save.
 func cleanupFiles() {
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		log.Printf("Cleanup: cannot open data dir: %v", err)
 		return
 	}
-
 	storageMu.Lock()
 	defer storageMu.Unlock()
+	cleanupFilesLocked()
+}
 
-	pattern := filepath.Join(dataDir, "*_content.txt")
-	contentFiles, err := filepath.Glob(pattern)
-	if err != nil || len(contentFiles) == 0 {
-		return
-	}
+// cleanupFilesLocked performs the cleanup work. The caller must hold storageMu.
+func cleanupFilesLocked() {
+	cleanupTempFilesLocked()
 
 	now := time.Now()
 	ageThreshold := now.Add(-time.Duration(ageLimitDays) * 24 * time.Hour)
+
+	pattern := filepath.Join(dataDir, "*"+contentSuffix)
+	contentFiles, err := filepath.Glob(pattern)
+	if err != nil {
+		// Data dir unreadable: we can't know the true size, so assume the worst
+		// and block further saves rather than risk an unbounded disk.
+		usedBytes = maxSizeBytes()
+		return
+	}
 
 	var all []fileInfo
 	for _, f := range contentFiles {
@@ -234,8 +298,7 @@ func cleanupFiles() {
 	for _, fi := range keep {
 		keptSize += fi.size
 	}
-	maxSize := int64(maxTotalSizeMB) * 1024 * 1024
-	if keptSize > maxSize {
+	if keptSize > maxSizeBytes() {
 		sort.Slice(keep, func(i, j int) bool { return keep[i].mtime.Before(keep[j].mtime) })
 		target := int64(purgeToSizeMB) * 1024 * 1024
 		for keptSize > target && len(keep) > 0 {
@@ -247,14 +310,57 @@ func cleanupFiles() {
 
 	// Stage 3: delete
 	for _, fi := range del {
-		saltPath := strings.TrimSuffix(fi.path, "_content.txt") + "_salt.txt"
-		for _, p := range []string{fi.path, saltPath} {
+		base := strings.TrimSuffix(fi.path, contentSuffix)
+		for _, p := range []string{fi.path, base + saltSuffix, base + authSuffix} {
 			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 				log.Printf("Cleanup: error removing %s: %v", p, err)
 			}
 		}
 		log.Printf("Cleanup: deleted %s", fi.path)
 	}
+
+	// Refresh the write budget: whatever content survived is the new total.
+	usedBytes = 0
+	for _, fi := range keep {
+		usedBytes += fi.size
+	}
+
+	// Stage 4: reclaim orphaned sidecars (no matching content file). A salt or
+	// token digest only exists to serve its note; without content it is pure
+	// waste. The reverse is never done — a sidecar whose content still exists is
+	// never removed, or that note becomes undecryptable or unwritable.
+	for _, suffix := range sidecarSuffixes {
+		files, err := filepath.Glob(filepath.Join(dataDir, "*"+suffix))
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			contentPath := strings.TrimSuffix(f, suffix) + contentSuffix
+			if _, err := os.Stat(contentPath); os.IsNotExist(err) {
+				if rmErr := os.Remove(f); rmErr != nil && !os.IsNotExist(rmErr) {
+					log.Printf("Cleanup: error removing %s: %v", f, rmErr)
+				}
+			}
+		}
+	}
+}
+
+// cleanupTempFilesLocked removes stale temp files — staged atomicWrite targets
+// that a crash left behind. The caller must hold storageMu.
+func cleanupTempFilesLocked() {
+	tmpFiles, _ := filepath.Glob(filepath.Join(dataDir, ".tmp-*"))
+	stale := time.Now().Add(-time.Hour)
+	for _, f := range tmpFiles {
+		if st, err := os.Stat(f); err == nil && st.ModTime().Before(stale) {
+			if rmErr := os.Remove(f); rmErr != nil && !os.IsNotExist(rmErr) {
+				log.Printf("Cleanup: error removing %s: %v", f, rmErr)
+			}
+		}
+	}
+}
+
+func maxSizeBytes() int64 {
+	return int64(maxTotalSizeMB) * 1024 * 1024
 }
 
 func cleanupLoop(ctx context.Context) {
@@ -277,6 +383,19 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+}
+
+// fontsHandler serves the self-hosted web fonts. Only plain .woff2 files are
+// exposed (no directory listings, no subpaths), and they're immutable, so
+// browsers may cache them for a year.
+func fontsHandler(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/fonts/")
+	if name == "" || strings.ContainsAny(name, "/\\") || !strings.HasSuffix(name, ".woff2") {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeFile(w, r, filepath.Join(staticDir, "fonts", name))
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -320,39 +439,34 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentPath := filepath.Join(dataDir, fileHash+"_content.txt")
-	saltPath := filepath.Join(dataDir, fileHash+"_salt.txt")
-
-	// Serialize with cleanup so a note's content and salt are read as a single
-	// consistent snapshot — cleanup can't delete the files mid-read. The lock is
-	// released before the response is written, so a large note doesn't stall
-	// other requests during network transmission.
+	// Loads never write. Serialize with save/cleanup so content and salt are read
+	// as one consistent snapshot; the lock is released before the response is
+	// written, so a large note doesn't stall other requests.
 	storageMu.Lock()
-
-	salt, err := ensureSalt(saltPath)
-	if err != nil {
+	content, err := os.ReadFile(notePath(fileHash, contentSuffix))
+	if errors.Is(err, os.ErrNotExist) {
 		storageMu.Unlock()
-		log.Printf("ensureSalt(%s): %v", fileHash, err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load content from server"})
+		// No note at this link yet: the client picks a salt and the note comes
+		// into existence on its first save.
+		writeJSON(w, http.StatusOK, map[string]string{"content": "", "salt": "", "version": ""})
 		return
 	}
-
-	content := ""
-	got, err := os.ReadFile(contentPath)
-	switch {
-	case err == nil:
-		content = string(got)
-	case errors.Is(err, os.ErrNotExist):
-		content = ""
-	default:
-		storageMu.Unlock()
-		log.Printf("ReadFile(%s): %v", contentPath, err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load content from server"})
-		return
+	var salt []byte
+	if err == nil {
+		salt, err = os.ReadFile(notePath(fileHash, saltSuffix))
 	}
 	storageMu.Unlock()
 
-	writeJSON(w, http.StatusOK, map[string]string{"content": content, "salt": salt})
+	if err != nil {
+		log.Printf("load note failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load content from server"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"content": string(content),
+		"salt":    string(salt),
+		"version": contentVersion(content),
+	})
 }
 
 func saveHandler(w http.ResponseWriter, r *http.Request) {
@@ -372,6 +486,11 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid hash format"})
 		return
 	}
+	token, ok := decodeFixed(body["token"], tokenBytes)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid write token"})
+		return
+	}
 
 	if int64(len(encryptedContent)) > maxContentBytes {
 		writeJSON(w, http.StatusRequestEntityTooLarge,
@@ -379,30 +498,117 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentPath := filepath.Join(dataDir, fileHash+"_content.txt")
+	contentPath := notePath(fileHash, contentSuffix)
+	digest := tokenDigest(token)
 
-	// Serialize with cleanup so cleanup can't delete a note that was just saved.
-	// The lock is released once the bytes are on disk, before the response is
-	// written back over the network.
+	// storageMu is held across the auth, version and budget checks AND the
+	// write, so cleanup can't delete a just-saved note, two creators can't both
+	// claim a link, two tabs can't both pass the version check, and the used-bytes counter never disagrees with the filesystem. It is
+	// released once the bytes are on disk, before the response goes out.
 	storageMu.Lock()
-	err := atomicWrite(contentPath, encryptedContent)
+
+	old, err := os.ReadFile(contentPath)
+	exists := err == nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		storageMu.Unlock()
+		log.Printf("save read failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Save failed on server"})
+		return
+	}
+
+	var salt []byte
+	if exists {
+		// Overwriting requires the token derived from the note's passphrase:
+		// holding the link alone lets you fetch ciphertext, not destroy it.
+		stored, err := os.ReadFile(notePath(fileHash, authSuffix))
+		if err != nil || subtle.ConstantTimeCompare(stored, []byte(digest)) != 1 {
+			storageMu.Unlock()
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Wrong passphrase for this note"})
+			return
+		}
+		// Checked only after auth, and only for existing notes: if the note
+		// expired while a tab was open, the save simply re-creates it.
+		if body["base"] != contentVersion(old) {
+			storageMu.Unlock()
+			writeJSON(w, http.StatusConflict,
+				map[string]string{"error": "This note was changed in another tab or device"})
+			return
+		}
+	} else if salt, ok = decodeFixed(body["salt"], saltBytes); !ok {
+		storageMu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid salt"})
+		return
+	}
+
+	// Existing content (if any) is already counted in usedBytes; replacing it
+	// with a smaller blob must not be rejected as an oversize write.
+	current := usedBytes - int64(len(old))
+	if current < 0 {
+		current = 0 // bookkeeping drifted (file removed out of band); don't compound it
+	}
+	if current+int64(len(encryptedContent)) > maxSizeBytes() {
+		storageMu.Unlock()
+		writeJSON(w, http.StatusInsufficientStorage,
+			map[string]string{"error": "Server storage is full. Try again later."})
+		return
+	}
+
+	err = nil
+	if !exists {
+		// Sidecars first, content last: a crash before the content write leaves
+		// only orphans that cleanup reclaims, never a note without its salt.
+		err = atomicWrite(notePath(fileHash, saltSuffix), base64.StdEncoding.EncodeToString(salt))
+		if err == nil {
+			err = atomicWrite(notePath(fileHash, authSuffix), digest)
+		}
+	}
+	if err == nil {
+		err = atomicWrite(contentPath, encryptedContent)
+	}
+	if err == nil {
+		usedBytes = current + int64(len(encryptedContent))
+	}
 	storageMu.Unlock()
 
 	if err != nil {
-		log.Printf("save(%s): %v", fileHash, err)
+		log.Printf("save failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Save failed on server"})
 		return
 	}
 
 	// Cleanup runs only from the background worker — never on the request path.
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "saved",
+		"version": contentVersion([]byte(encryptedContent)),
+	})
+}
+
+// newHandler builds the full route table wrapped in security headers and CORS.
+func newHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", indexHandler)
+	mux.HandleFunc("/app.js", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(staticDir, "app.js"))
+	})
+	mux.HandleFunc("/fonts/", fontsHandler)
+	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/api/load", loadHandler)
+	mux.HandleFunc("/api/save", saveHandler)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		applySecurityHeaders(w)
+		if !applyCORS(w, r) {
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func main() {
 	if err := validateConfig(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		log.Fatalf("Cannot create data dir %s: %v", dataDir, err)
 	}
 	if staticDir == "" {
@@ -417,22 +623,9 @@ func main() {
 	cleanupFiles()
 	go cleanupLoop(ctx)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", indexHandler)
-	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/api/load", loadHandler)
-	mux.HandleFunc("/api/save", saveHandler)
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !applyCORS(w, r) {
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
-
 	srv := &http.Server{
 		Addr:              listenAddr + ":" + listenPort,
-		Handler:           handler,
+		Handler:           newHandler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

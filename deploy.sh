@@ -6,6 +6,7 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFERRED_PORT=7860
 PORT_REQUESTED="${PORT:-}"
 DOMAIN="${DOMAIN:-paper.voidall.com}"
+DATA_DIR="${DATA_DIR:-/var/lib/paper}"
 BUILD_DIR="$APP_DIR"
 
 # Always use the toolchain actually installed on this machine. Without this,
@@ -245,14 +246,41 @@ if ! command -v go &>/dev/null; then
 fi
 info "Go $(go version | awk '{print $3}') building..."
 (cd "$APP_DIR" && CGO_ENABLED=0 go build -o paper .)
-mkdir -p "$APP_DIR/data"
 info "Binary built"
+
+# ── 2b. Data directory + optional filesystem quota ────────────────────────────
+step "Data directory"
+mkdir -p "$DATA_DIR" && chmod 700 "$DATA_DIR" || error "Cannot create $DATA_DIR"
+info "Data directory: $DATA_DIR"
+
+# Opt-in loopback filesystem quota. The app has its own 100 MB write budget,
+# but an OS-level limit defends against a compromised process or unexpected
+# files. Set QUOTA_SIZE_MB=e.g. 110 (slightly above MAX_TOTAL_SIZE_MB) to use.
+if [ -n "${QUOTA_SIZE_MB:-}" ]; then
+  QUOTA_IMG="$APP_DIR/data/quota.img"
+  if mountpoint -q "$DATA_DIR" 2>/dev/null; then
+    info "$DATA_DIR is already its own filesystem — quota active"
+  else
+    mkdir -p "$APP_DIR/data"
+    if [ ! -f "$QUOTA_IMG" ]; then
+      info "Creating ${QUOTA_SIZE_MB}MB loopback filesystem image..."
+      dd if=/dev/zero of="$QUOTA_IMG" bs=1M count="$QUOTA_SIZE_MB" status=none \
+        && mkfs.ext4 -F -q "$QUOTA_IMG" \
+        || warn "Could not create quota image — continuing without quota"
+    fi
+    if mount -o loop "$QUOTA_IMG" "$DATA_DIR" 2>/dev/null; then
+      info "Mounted ${QUOTA_SIZE_MB}MB filesystem at $DATA_DIR"
+    else
+      warn "Could not mount quota image (kernel module? permissions?) — continuing without quota"
+    fi
+  fi
+fi
 
 # ── 3. Start / restart with PM2 ───────────────────────────────────────────────
 step "PM2 process"
 pm2 delete "$APP_NAME" 2>/dev/null || true
 info "Starting '$APP_NAME' (paper binary) on 127.0.0.1:$PORT..."
-LISTEN_ADDR=127.0.0.1 LISTEN_PORT="$PORT" STATIC_DIR="$APP_DIR" pm2 start "$APP_DIR/paper" \
+LISTEN_ADDR=127.0.0.1 LISTEN_PORT="$PORT" STATIC_DIR="$APP_DIR" DATA_DIR="$DATA_DIR" pm2 start "$APP_DIR/paper" \
   --name "$APP_NAME" \
   --cwd "$APP_DIR" \
   --interpreter none \
@@ -308,6 +336,20 @@ PYEOF
       systemctl is-active --quiet cloudflared 2>/dev/null && sudo systemctl restart cloudflared && info "cloudflared restarted" \
         || warn "Restart cloudflared manually: sudo systemctl restart cloudflared" ;;
   esac
+fi
+
+# ── 4b. Cloudflare rate limiting (edge) ──────────────────────────────────────
+step "Cloudflare Rate Limiting"
+if [ -z "${CF_API_TOKEN:-}" ] || [ -z "${CF_ZONE_ID:-}" ]; then
+  warn "Set CF_API_TOKEN + CF_ZONE_ID to manage the rate limits via API.
+  Skipping — rules can be added manually in the dashboard (see README)."
+else
+  if python3 "$APP_DIR/cloudflare/rate-limit.py" apply \
+      --token "$CF_API_TOKEN" --zone-id "$CF_ZONE_ID" --host "$DOMAIN"; then
+    info "Edge rate limiting: /api/save and /api/load covered (per-IP, per zone)"
+  else
+    warn "Cloudflare rate-limit step failed — deploy continues, check the error above."
+  fi
 fi
 
 # ── 5. Verify it actually came up ─────────────────────────────────────────────

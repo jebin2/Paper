@@ -36,11 +36,11 @@ jobs:
 
       - name: Migrate existing files to LFS
         run: |
-          git lfs migrate import --include="*.jpg,*.jpeg,*.png,*.gif,*.mp3,*.mp4,*.wav,*.ttf,*.db,sliding_puzzle,stockfish/stockfish-ubuntu-x86-64-avx2" --everything
+          git lfs migrate import --include="*.jpg,*.jpeg,*.png,*.gif,*.mp3,*.mp4,*.wav,*.ttf,*.woff2,*.db,sliding_puzzle,stockfish/stockfish-ubuntu-x86-64-avx2" --everything
 
       - name: Track binary files with LFS
         run: |
-          git lfs track "*.jpg" "*.jpeg" "*.png" "*.gif" "*.mp3" "*.mp4" "*.wav" "*.ttf" "*.db"
+          git lfs track "*.jpg" "*.jpeg" "*.png" "*.gif" "*.mp3" "*.mp4" "*.wav" "*.ttf" "*.woff2" "*.db"
           git lfs track "sliding_puzzle"
           git lfs track "stockfish/stockfish-ubuntu-x86-64-avx2"
           git add .gitattributes
