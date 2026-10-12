@@ -15,6 +15,7 @@ A minimal, secure notepad for temporary notes. Zero tracking, zero accounts — 
 
 - 🔐 **Client-side encryption** — Your password never leaves your browser
 - 🔗 **Private links** — Each note lives at a random, unguessable URL
+- 🏷️ **Memorable names** — Optionally also reach a note at `/#groceries`
 - 🗑️ **Auto-delete** — Notes removed after 2 days without being opened or edited
 - 🌐 **Access anywhere** — Keep the link + password, open it from any device
 - 🚫 **No tracking** — No cookies, no analytics, no accounts, no third-party requests
@@ -54,10 +55,34 @@ Paper/
 ├── fonts/          # Self-hosted Plus Jakarta Sans (woff2, SIL OFL 1.1)
 ├── main.go         # Go backend (single binary, stdlib only)
 ├── ratelimit.go    # Per-client rate limiting for the API (token buckets)
+├── alias.go        # Optional memorable names for notes (/#groceries)
 ├── deploy.sh       # VPS deploy (PM2 + Cloudflare Tunnel)
 ├── Dockerfile      # Multi-stage container build
 └── go.mod
 ```
+
+### Names (`alias.go`)
+
+A note always lives at its random link, and may also answer to **one** memorable
+name: `/#groceries` reaches the same note as `/#9f3c…`. Names are 3-32 chars of
+lowercase letters, digits and dashes (a 32-hex string is always an ID, never a
+name).
+
+- Setting, renaming or removing a name takes the note's write token, so only
+  whoever knows the passphrase can do it. First claim wins; a taken name gets `409`.
+- Names resolve **server-side** and the random link is never sent back, so guessing
+  a name doesn't expose the strong link.
+- Typing an unused name into the URL creates a note that takes that name on its
+  first save; if someone claims it in between, the note stays at its random link
+  and the editor says so.
+- Renaming frees the old name immediately. Names are deleted with their note, and
+  cleanup reclaims names left behind by an interrupted rename. Capped at 10k names.
+
+**The trade-off:** a name is guessable, so anyone who guesses it can download that
+note's ciphertext and attack the passphrase offline, where rate limits don't apply.
+Write tokens still stop them changing the note. Unnamed notes keep the original
+property that the link itself is the secret — so name the shopping list, not the
+one with secrets in it.
 
 ### Frontend (`index.html` + `app.js`)
 - Single HTML file (styles) with the application logic in an external `app.js`
@@ -78,6 +103,7 @@ Paper/
     requires the matching write token (`403` otherwise), compared in constant time
   - `save` also requires `base` = the version the edit started from (`load` and `save` both
     return the current `version`); a stale base gets `409` instead of silently overwriting
+  - `name` sets, renames or removes a note's memorable name (same write token as `save`)
 - File-based storage (configurable via `DATA_DIR`)
 - Auto-cleanup: notes not opened or edited for 2 days (a load refreshes the note's mtime), or
   the oldest-active notes when storage exceeds the limit,
@@ -103,6 +129,7 @@ Paper/
 | `CORS_ORIGINS` | *(empty)* | Comma-separated allowed origins; empty = CORS disabled |
 | `RATE_LIMIT_SAVE_PER_MIN` | `60` | `/api/save` requests per client per minute; `0` disables |
 | `RATE_LIMIT_LOAD_PER_MIN` | `120` | `/api/load` requests per client per minute; `0` disables |
+| `RATE_LIMIT_NAME_PER_MIN` | `20` | `/api/name` requests per client per minute; `0` disables |
 | `TRUST_PROXY_HEADER` | *(empty)* | Header holding the real client IP behind a proxy (`CF-Connecting-IP` in `deploy.sh`, `X-Forwarded-For` in Docker); empty = connection address |
 
 ## Run Locally
@@ -150,6 +177,7 @@ Every client gets a token bucket per endpoint:
 |----------|---------|-------|
 | `/api/save` | 60 / min | 30 |
 | `/api/load` | 120 / min | 60 |
+| `/api/name` | 20 / min | 10 |
 
 Over the limit, requests get `429` with `Retry-After`, before the body is even
 read. The editor shows "too many saves" and retries with backoff; the login

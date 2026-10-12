@@ -32,6 +32,8 @@ func resetConfig(t *testing.T) string {
 	saveRatePerMin = 0 // limiting has its own tests; keep load/concurrency tests unthrottled
 	loadRatePerMin = 0
 	trustProxyHeader = ""
+	nameRatePerMin = 0
+	aliasCount = 0
 	return dir
 }
 
@@ -102,6 +104,7 @@ type loadResp struct {
 	Content string `json:"content"`
 	Salt    string `json:"salt"`
 	Version string `json:"version"`
+	Name    string `json:"name"`
 }
 
 func loadNote(t *testing.T, h http.Handler, hash string) (int, loadResp) {
@@ -517,15 +520,20 @@ func TestExpiredNoteRecreatedByOpenTab(t *testing.T) {
 
 func TestInvalidHash(t *testing.T) {
 	h := newTestApp(t).h
+	// 16 hex chars is no longer an ID but IS a valid name, so it isn't here.
 	bad := []string{
 		"",
 		"G",
-		"A",
-		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-		"aaaaaaaaaaaaaaaa",
-		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"ab",                                // shorter than a name may be
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",  // uppercase
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // 33 chars
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!",
 		" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"-leading-dash",
+		"trailing-dash-",
+		"has spaces",
+		"../escape",
+		"dots.not.allowed",
 	}
 	for _, hash := range bad {
 		if code := saveNote(t, h, hash, "x"); code != http.StatusBadRequest {
@@ -592,9 +600,13 @@ func TestLongHashAccepted(t *testing.T) {
 	if code, resp := loadNote(t, app.h, id); code != http.StatusOK || resp.Content != "hello via long link" {
 		t.Fatalf("load 32-hex: code=%d content=%q", code, resp.Content)
 	}
-	// The old 16-hex password-derived width is no longer accepted.
-	if code, _ := loadNote(t, app.h, "aaaaaaaaaaaaaaaa"); code != http.StatusBadRequest {
-		t.Fatalf("16-hex load: got %d, want 400", code)
+	// The old 16-hex password-derived width is no longer an ID. It is a valid
+	// *name*, which points at nothing until someone claims it.
+	if code, resp := loadNote(t, app.h, "aaaaaaaaaaaaaaaa"); code != http.StatusOK || resp.Salt != "" {
+		t.Fatalf("16-hex load: code=%d salt=%q, want an empty note", code, resp.Salt)
+	}
+	if code := saveNote(t, app.h, "aaaaaaaaaaaaaaaa", "x"); code != http.StatusNotFound {
+		t.Fatalf("save to unclaimed name: got %d, want 404", code)
 	}
 }
 

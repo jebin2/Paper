@@ -38,6 +38,7 @@ var (
 	saveRatePerMin   = getenvInt("RATE_LIMIT_SAVE_PER_MIN", 60)
 	loadRatePerMin   = getenvInt("RATE_LIMIT_LOAD_PER_MIN", 120)
 	trustProxyHeader = getenv("TRUST_PROXY_HEADER", "")
+	nameRatePerMin   = getenvInt("RATE_LIMIT_NAME_PER_MIN", 20)
 	maxContentBytes  = int64(maxContentSizeMB) * 1024 * 1024
 	maxRequestBytes  = maxContentBytes + 64*1024 // JSON envelope overhead on top of the content limit
 )
@@ -83,7 +84,7 @@ func validateConfig() error {
 		return errors.New("MAX_CONTENT_SIZE_MB must be > 0")
 	case ageLimitDays < 0:
 		return errors.New("AGE_LIMIT_DAYS must be >= 0")
-	case saveRatePerMin < 0 || loadRatePerMin < 0:
+	case saveRatePerMin < 0 || loadRatePerMin < 0 || nameRatePerMin < 0:
 		return errors.New("RATE_LIMIT_*_PER_MIN must be >= 0 (0 disables)")
 	case cleanupInterval <= 0:
 		return errors.New("CLEANUP_INTERVAL_MINUTES must be > 0")
@@ -213,12 +214,21 @@ const (
 	authSuffix    = "_auth.txt"
 )
 
-var sidecarSuffixes = []string{saltSuffix, authSuffix}
+var sidecarSuffixes = []string{saltSuffix, authSuffix, nameSuffix}
 
 const (
 	saltBytes  = 16 // client-chosen PBKDF2 salt
 	tokenBytes = 32 // client-derived write token (never the encryption key)
 )
+
+// sidecarPaths lists a note's sidecar files, given its path prefix.
+func sidecarPaths(base string) []string {
+	paths := make([]string, 0, len(sidecarSuffixes))
+	for _, suffix := range sidecarSuffixes {
+		paths = append(paths, base+suffix)
+	}
+	return paths
+}
 
 func notePath(hash, suffix string) string {
 	return filepath.Join(dataDir, hash+suffix)
@@ -316,7 +326,7 @@ func cleanupFilesLocked() {
 	// Stage 3: delete
 	for _, fi := range del {
 		base := strings.TrimSuffix(fi.path, contentSuffix)
-		for _, p := range []string{fi.path, base + saltSuffix, base + authSuffix} {
+		for _, p := range append([]string{fi.path}, sidecarPaths(base)...) {
 			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 				log.Printf("Cleanup: error removing %s: %v", p, err)
 			}
@@ -329,6 +339,9 @@ func cleanupFilesLocked() {
 	for _, fi := range keep {
 		usedBytes += fi.size
 	}
+
+	// Stage 4b happens after this: names pointing at deleted notes.
+	defer cleanupAliasesLocked()
 
 	// Stage 4: reclaim orphaned sidecars (no matching content file). A salt or
 	// token digest only exists to serve its note; without content it is pure
@@ -455,9 +468,9 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	fileHash := body["hash"]
-	if !sanitizeHash(fileHash) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid hash format"})
+	ref := body["hash"]
+	if !validRef(ref) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid link"})
 		return
 	}
 
@@ -466,17 +479,30 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	// as one consistent snapshot; the lock is released before the response is
 	// written, so a large note doesn't stall other requests.
 	storageMu.Lock()
-	content, err := os.ReadFile(notePath(fileHash, contentSuffix))
-	if errors.Is(err, os.ErrNotExist) {
+	fileHash, found, err := resolveRef(ref)
+	if err == nil && !found {
 		storageMu.Unlock()
-		// No note at this link yet: the client picks a salt and the note comes
-		// into existence on its first save.
-		writeJSON(w, http.StatusOK, map[string]string{"content": "", "salt": "", "version": ""})
+		// Nothing at this link or name yet: the client picks a salt and the
+		// note comes into existence on its first save.
+		writeJSON(w, http.StatusOK, emptyNote)
 		return
+	}
+	var content []byte
+	if err == nil {
+		content, err = os.ReadFile(notePath(fileHash, contentSuffix))
+		if errors.Is(err, os.ErrNotExist) {
+			storageMu.Unlock()
+			writeJSON(w, http.StatusOK, emptyNote)
+			return
+		}
 	}
 	var salt []byte
 	if err == nil {
 		salt, err = os.ReadFile(notePath(fileHash, saltSuffix))
+	}
+	name := ""
+	if err == nil {
+		name = noteName(fileHash)
 	}
 	if err == nil {
 		// Opening a note counts as activity: expiry and size purges go by the
@@ -499,6 +525,7 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 		"content": string(content),
 		"salt":    string(salt),
 		"version": contentVersion(content),
+		"name":    name,
 	})
 }
 
@@ -512,11 +539,11 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	fileHash := body["hash"]
+	ref := body["hash"]
 	encryptedContent := body["content"]
 
-	if !sanitizeHash(fileHash) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid hash format"})
+	if !validRef(ref) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid link"})
 		return
 	}
 	token, ok := decodeFixed(body["token"], tokenBytes)
@@ -530,7 +557,6 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentPath := notePath(fileHash, contentSuffix)
 	digest := tokenDigest(token)
 
 	// storageMu is held across the auth, version and budget checks AND the
@@ -538,6 +564,22 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 	// claim a link, two tabs can't both pass the version check, and the used-bytes counter never disagrees with the filesystem. It is
 	// released once the bytes are on disk, before the response goes out.
 	storageMu.Lock()
+
+	fileHash, found, err := resolveRef(ref)
+	if err != nil {
+		storageMu.Unlock()
+		log.Printf("save resolve failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Save failed on server"})
+		return
+	}
+	if !found {
+		// A name only exists once its note does; saving to an unknown name
+		// would create a note nothing points at.
+		storageMu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "This name doesn't exist yet"})
+		return
+	}
+	contentPath := notePath(fileHash, contentSuffix)
 
 	old, err := os.ReadFile(contentPath)
 	exists := err == nil
@@ -626,6 +668,7 @@ func newHandler() http.Handler {
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/api/load", rateLimited(newRateLimiter(loadRatePerMin), loadHandler))
 	mux.HandleFunc("/api/save", rateLimited(newRateLimiter(saveRatePerMin), saveHandler))
+	mux.HandleFunc("/api/name", rateLimited(newRateLimiter(nameRatePerMin), nameHandler))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		applySecurityHeaders(w)

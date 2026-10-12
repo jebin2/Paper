@@ -3,6 +3,8 @@
         let currentToken = '';       // base64 write token proving knowledge of the passphrase
         let currentSalt = null;
         let currentVersion = '';     // server version this editor is based on ('' = note not created yet)
+        let currentName = '';        // the note's memorable name, '' if it has none
+        let pendingName = '';        // name typed into the URL, claimed after the first save
         let conflict = false;        // a save hit 409; autosave pauses until the user resolves it
         let fileHash = '';
         let saveTimeout = null;
@@ -47,7 +49,9 @@
             badge.textContent = freshNote ? 'New note' : 'Existing note';
             badge.classList.toggle('new', freshNote);
             document.getElementById('loginSubtitle').textContent = freshNote
-                ? 'Choose a passphrase to encrypt it. Notes vanish after 2 days without being opened or edited.'
+                ? (pendingName
+                    ? `Nothing is saved at “${pendingName}” yet. Choose a passphrase and this note takes that name.`
+                    : 'Choose a passphrase to encrypt it. Notes vanish after 2 days without being opened or edited.')
                 : 'Enter the passphrase for the note at this link.';
             document.getElementById('linkBox').hidden = !freshNote;
             document.getElementById('linkField').value = location.href;
@@ -84,10 +88,23 @@
         // by the password. Possession of the link lets you reach the note; your
         // password is only used to derive the encryption key (via PBKDF2).
         const NOTE_ID_RE = /^[0-9a-f]{32}$/;
+        // A memorable name a note can also answer to: 3-32 chars, lowercase
+        // letters, digits and dashes. Never a note ID (32 hex chars).
+        const NAME_RE = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/;
 
-        function noteIdFromUrl() {
+        function isName(s) {
+            return NAME_RE.test(s) && !NOTE_ID_RE.test(s);
+        }
+
+        // What the URL points at: a note ID, a name, or nothing.
+        function refFromUrl() {
             const h = (location.hash || '').slice(1).toLowerCase();
-            return NOTE_ID_RE.test(h) ? h : '';
+            return NOTE_ID_RE.test(h) || isName(h) ? h : '';
+        }
+
+        function setUrlRef(ref) {
+            history.replaceState(null, '', '#' + ref);
+            document.getElementById('linkField').value = location.href;
         }
 
         function randomNoteId() {
@@ -209,17 +226,32 @@
         document.getElementById('newNoteLink').addEventListener('click', newNote);
         document.getElementById('lockBtn').addEventListener('click', lockNote);
 
-        // Every note lives at a random link. A visitor landing without one gets
-        // a freshly-generated capability; returning visitors keep theirs.
-        let noteId = noteIdFromUrl();
+        // Every note lives at a random link, and may also answer to a name.
+        // A visitor landing without either gets a freshly-generated link.
         let freshNote = false;
-        if (!noteId) {
-            noteId = randomNoteId();
+        fileHash = refFromUrl();
+        if (!fileHash) {
+            fileHash = randomNoteId();
             freshNote = true;
         }
-        fileHash = noteId; // lowercase hex from both sources
-        history.replaceState(null, '', '#' + fileHash);
+        setUrlRef(fileHash);
         renderLoginMode();
+
+        // Loads never write, so it is cheap to ask up front whether this link
+        // or name has a note behind it, and label the screen accordingly.
+        if (!freshNote) {
+            apiLoad(fileHash).then(data => {
+                if (data.salt || sessionActive) return;
+                freshNote = true;
+                if (isName(fileHash)) {
+                    // The name is unclaimed: the note gets a random link now and
+                    // takes the name once it has been saved.
+                    pendingName = fileHash;
+                    fileHash = randomNoteId();
+                }
+                renderLoginMode();
+            }).catch(() => { /* offline: assume the note exists and let login report it */ });
+        }
         document.getElementById('copyLinkBtn').addEventListener('click', e => copyLink(e.currentTarget));
         document.getElementById('loginCopyBtn').addEventListener('click', e => copyLink(e.currentTarget));
         document.getElementById('linkField').addEventListener('focus', e => e.target.select());
@@ -273,6 +305,21 @@
             return data;
         }
 
+        async function apiName(ref, name, token) {
+            const response = await fetch('/api/name', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hash: ref, name, token })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                const err = new Error(data.error || 'Could not set the name');
+                err.status = response.status;
+                throw err;
+            }
+            return data;
+        }
+
         async function login() {
             if (isWorking) return;
             isWorking = true;
@@ -307,6 +354,8 @@
                 currentKey = key;
                 currentToken = token;
                 currentVersion = data.version;
+                currentName = data.name || '';
+                renderNameButton();
                 setConflict(false);
                 freshNote = false;
 
@@ -353,6 +402,8 @@
                 const saved = await apiSave(fileHash, encryptedContent, currentToken, currentSalt, currentVersion);
                 currentVersion = saved.version;
                 retryAttempt = -1;
+                renderNameButton(); // the note exists now, so it can be named
+                if (pendingName) claimPendingName();
                 updateSaveStatus(dirty ? 'Unsaved' : 'Saved', dirty ? 'pending' : 'saved');
             } catch (error) {
                 console.error('Save failed:', error);
@@ -406,14 +457,17 @@
 
         function newNote() {
             const id = randomNoteId();
-            history.replaceState(null, '', '#' + id);
             fileHash = id;
+            setUrlRef(id);
             freshNote = true;
             currentKey = null;
             currentToken = '';
             currentSalt = null;
             currentVersion = '';
+            currentName = '';
+            pendingName = '';
             setConflict(false);
+            renderNameButton();
             sessionActive = false;
             dirty = false;
             retryAttempt = -1;
@@ -464,8 +518,11 @@
             currentToken = '';
             currentSalt = null;
             currentVersion = '';
+            currentName = '';
+            pendingName = '';
             setConflict(false);
-            fileHash = noteIdFromUrl();
+            renderNameButton();
+            fileHash = refFromUrl() || fileHash;
             clearTimeout(saveTimeout);
             sessionActive = false;
             dirty = false;
@@ -479,6 +536,79 @@
             showScreen(false);
             document.getElementById('passwordInput').focus();
         }
+
+        // --- NAMES (a memorable link for this note) ---
+        function renderNameButton() {
+            const btn = document.getElementById('nameBtn');
+            btn.textContent = currentName ? '#' + currentName : 'Name link';
+            // A note can only be named once it exists, i.e. after its first save.
+            btn.disabled = !currentVersion;
+            btn.title = !currentVersion
+                ? 'Type something first — the note is created on its first save'
+                : currentName
+                    ? `This note also answers to #${currentName} — click to rename`
+                    : 'Give this note a memorable link';
+        }
+
+        // A name typed into the URL is claimed once the note actually exists.
+        async function claimPendingName() {
+            const wanted = pendingName;
+            pendingName = '';
+            try {
+                const result = await apiName(fileHash, wanted, currentToken);
+                currentName = result.name;
+                setUrlRef(currentName);
+                renderNameButton();
+            } catch (error) {
+                // Someone else got there first: fall back to the random link so
+                // the note stays reachable, and say so.
+                setUrlRef(fileHash);
+                renderNameButton();
+                showNameDialog(error.status === 409
+                    ? `“${wanted}” was taken while you were typing. Your note is safe at its random link — pick another name, or close this and copy the link.`
+                    : `Couldn't claim “${wanted}”: ${error.message}`);
+            }
+        }
+
+        function showNameDialog(message = '') {
+            const dialog = document.getElementById('nameDialog');
+            const input = document.getElementById('nameInput');
+            input.value = currentName;
+            document.getElementById('nameRemoveBtn').hidden = !currentName;
+            document.getElementById('nameError').textContent = message;
+            dialog.showModal();
+            input.focus();
+            input.select();
+        }
+
+        async function submitName(name) {
+            const errorBox = document.getElementById('nameError');
+            if (name && !isName(name)) {
+                errorBox.textContent = 'Use 3-32 lowercase letters, numbers or dashes.';
+                return;
+            }
+            const saveBtn = document.getElementById('nameSaveBtn');
+            saveBtn.disabled = true;
+            try {
+                const result = await apiName(fileHash, name, currentToken);
+                currentName = result.name;
+                setUrlRef(currentName || fileHash);
+                renderNameButton();
+                document.getElementById('nameDialog').close();
+            } catch (error) {
+                errorBox.textContent = error.message;
+            } finally {
+                saveBtn.disabled = false;
+            }
+        }
+
+        document.getElementById('nameBtn').addEventListener('click', () => showNameDialog());
+        document.getElementById('nameForm').addEventListener('submit', e => {
+            e.preventDefault();
+            submitName(document.getElementById('nameInput').value.trim().toLowerCase());
+        });
+        document.getElementById('nameRemoveBtn').addEventListener('click', () => submitName(''));
+        document.getElementById('nameCancelBtn').addEventListener('click', () => document.getElementById('nameDialog').close());
 
         // --- CONFLICTS (another tab or device saved first) ---
         function setConflict(on) {
