@@ -15,7 +15,7 @@ A minimal, secure notepad for temporary notes. Zero tracking, zero accounts — 
 
 - 🔐 **Client-side encryption** — Your password never leaves your browser
 - 🔗 **Private links** — Each note lives at a random, unguessable URL
-- 🏷️ **Memorable names** — Optionally also reach a note at `/#groceries`
+- 🏷️ **Memorable names** — Optionally also reach a note at `/#my-note`
 - 🗑️ **Auto-delete** — Notes removed after 2 days without being opened or edited
 - 🌐 **Access anywhere** — Keep the link + password, open it from any device
 - 🚫 **No tracking** — No cookies, no analytics, no accounts, no third-party requests
@@ -55,7 +55,7 @@ Paper/
 ├── fonts/          # Self-hosted Plus Jakarta Sans (woff2, SIL OFL 1.1)
 ├── main.go         # Go backend (single binary, stdlib only)
 ├── ratelimit.go    # Per-client rate limiting for the API (token buckets)
-├── alias.go        # Optional memorable names for notes (/#groceries)
+├── alias.go        # Optional memorable names for notes (/#my-note)
 ├── deploy.sh       # VPS deploy (PM2 + Cloudflare Tunnel)
 ├── Dockerfile      # Multi-stage container build
 └── go.mod
@@ -64,7 +64,7 @@ Paper/
 ### Names (`alias.go`)
 
 A note always lives at its random link, and may also answer to **one** memorable
-name: `/#groceries` reaches the same note as `/#9f3c…`. Names are 3-32 chars of
+name: `/#my-note` reaches the same note as `/#9f3c…`. Names are 3-32 chars of
 lowercase letters, digits and dashes (a 32-hex string is always an ID, never a
 name).
 
@@ -81,8 +81,8 @@ name).
 **The trade-off:** a name is guessable, so anyone who guesses it can download that
 note's ciphertext and attack the passphrase offline, where rate limits don't apply.
 Write tokens still stop them changing the note. Unnamed notes keep the original
-property that the link itself is the secret — so name the shopping list, not the
-one with secrets in it.
+property that the link itself is the secret — so name the throwaway notes, not
+the ones with secrets in them.
 
 ### Frontend (`index.html` + `app.js`)
 - Single HTML file (styles) with the application logic in an external `app.js`

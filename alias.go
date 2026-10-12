@@ -14,7 +14,7 @@ import (
 // --- NAMES (custom links) ---
 //
 // A note always lives at its random 128-bit link. It may also be given one
-// memorable name, so /#groceries reaches the same note as /#9f3c...
+// memorable name, so /#my-note reaches the same note as /#9f3c...
 //
 // The name is resolved on the server and the random link is never sent back,
 // so guessing a name doesn't expose the strong link. A name IS guessable
