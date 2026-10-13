@@ -886,6 +886,14 @@
             margin-bottom: 18px;
         }
 
+        .dialog .link-box {
+            margin: 0 0 16px;
+        }
+
+        .dialog .link-box .dialog-hint {
+            margin: 8px 0 0;
+        }
+
         .dialog-actions {
             display: flex;
             justify-content: flex-end;
@@ -1112,8 +1120,7 @@
     <dialog id="nameDialog" class="dialog" aria-labelledby="nameDialogTitle">
         <form id="nameForm">
             <h2 id="nameDialogTitle">Name this link</h2>
-            <p>Reach this note at a link you can remember instead of the random one. The random link keeps working.
-            </p>
+            <p>Reach this note at a link you can remember instead of the random one.</p>
             <label for="nameInput" class="visually-hidden">Name</label>
             <div class="name-row">
                 <span class="name-prefix">#</span>
@@ -1122,6 +1129,16 @@
             </div>
             <p id="nameHint" class="dialog-hint">3-32 characters: lowercase letters, numbers and dashes. A name is
                 guessable, so anyone who guesses it can reach this note — keep a strong passphrase.</p>
+            <div id="nameLinkBox" class="link-box" hidden>
+                <label for="nameLinkField" class="link-box-label">⚠ Copy the random link first — it can't be shown
+                    again</label>
+                <div class="link-row">
+                    <input id="nameLinkField" class="link-field" type="text" readonly>
+                    <button type="button" id="nameLinkCopyBtn" class="pill-btn">Copy</button>
+                </div>
+                <p class="dialog-hint">Naming the note puts the name in the address bar, and the server never gives
+                    the random link back. Without a copy, the guessable name becomes the only way in.</p>
+            </div>
             <p id="nameError" class="dialog-error" role="alert"></p>
             <div class="dialog-actions">
                 <button type="button" id="nameRemoveBtn" class="pill-btn danger" hidden>Remove name</button>

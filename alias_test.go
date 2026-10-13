@@ -246,6 +246,34 @@ func TestNameCapEnforced(t *testing.T) {
 	}
 }
 
+// A name is only reserved while its note lives. When the note expires, the
+// next asker gets the name, without waiting for cleanup to sweep the alias.
+func TestExpiredNoteFreesItsName(t *testing.T) {
+	app := newTestApp(t)
+	gone, taker := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	saveNote(t, app.h, gone, "old note")
+	saveNoteAs(t, app.h, taker, "new note", otherToken, otherSalt)
+	if code, _ := setName(t, app.h, gone, "shared", testToken); code != http.StatusOK {
+		t.Fatalf("first claim: got %d", code)
+	}
+
+	// Expiry, as cleanup would do it, but before cleanup touches the alias.
+	if err := os.Remove(filepath.Join(app.dir, gone+contentSuffix)); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, resp := setName(t, app.h, taker, "shared", otherToken); code != http.StatusOK {
+		t.Fatalf("claiming a dead note's name: got %d (%s), want 200", code, resp.Error)
+	}
+	if got := mustLoad(t, app.h, "shared").Content; got != "new note" {
+		t.Fatalf("name resolves to %q, want the note that claimed it", got)
+	}
+	// Reusing the alias file must not double-count it against the cap.
+	if aliasCount != 1 {
+		t.Fatalf("aliasCount = %d after reclaiming a name, want 1", aliasCount)
+	}
+}
+
 func mustLoad(t *testing.T, h http.Handler, ref string) loadResp {
 	t.Helper()
 	code, resp := loadNote(t, h, ref)

@@ -16,6 +16,11 @@
 
         const PBKDF2_ITERATIONS = 250000;
 
+        // Every request gets a deadline. Without one a stalled connection (a
+        // dead tunnel, a captive portal) leaves "Saving..." on screen forever
+        // and nothing ever retries.
+        const REQUEST_TIMEOUT = 15000;
+
         // After a failed save, retry with exponential-ish backoff so a
         // sustained outage doesn't turn into a busy retry loop. The ladder
         // resets to the start on any successful save (and on login/logout).
@@ -100,6 +105,11 @@
         function refFromUrl() {
             const h = (location.hash || '').slice(1).toLowerCase();
             return NOTE_ID_RE.test(h) || isName(h) ? h : '';
+        }
+
+        // The full URL for a note, by link or by name.
+        function noteUrl(ref) {
+            return location.origin + location.pathname + '#' + ref;
         }
 
         function setUrlRef(ref) {
@@ -271,53 +281,47 @@
             saveTimeout = setTimeout(saveIfDirty, 1500);
         });
 
-        async function apiLoad(id) {
-            const response = await fetch('/api/load', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ hash: id })
-            });
-            const data = await response.json();
+        // Every API call is one JSON POST with a deadline. A rejected call
+        // carries err.status when the server answered; a call that never got
+        // an answer (offline, DNS, or past REQUEST_TIMEOUT) carries none, so
+        // callers can tell "the server said no" from "no server".
+        async function apiPost(path, payload, fallbackMessage) {
+            let response;
+            try {
+                response = await fetch(path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    signal: AbortSignal.timeout(REQUEST_TIMEOUT)
+                });
+            } catch {
+                throw new Error("Couldn't reach the server");
+            }
+            // A proxy error page isn't JSON; fall back to the status code.
+            const data = await response.json().catch(() => ({}));
             if (!response.ok) {
-                const err = new Error(data.error || 'Load failed');
+                const err = new Error(data.error || fallbackMessage);
                 err.status = response.status;
                 throw err;
             }
             return data;
+        }
+
+        function apiLoad(id) {
+            return apiPost('/api/load', { hash: id }, 'Load failed');
         }
 
         // The salt only matters on the save that creates the note; the server
         // ignores it afterwards and keeps the original.
         // `base` is the version the edit started from; the server answers 409 if
         // the note has moved on since (another tab or device saved first).
-        async function apiSave(id, content, token, salt, base) {
-            const response = await fetch('/api/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ hash: id, content, token, salt: toBase64(salt), base })
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                const err = new Error(data.error || 'Save failed');
-                err.status = response.status;
-                throw err;
-            }
-            return data;
+        function apiSave(id, content, token, salt, base) {
+            return apiPost('/api/save',
+                { hash: id, content, token, salt: toBase64(salt), base }, 'Save failed');
         }
 
-        async function apiName(ref, name, token) {
-            const response = await fetch('/api/name', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ hash: ref, name, token })
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                const err = new Error(data.error || 'Could not set the name');
-                err.status = response.status;
-                throw err;
-            }
-            return data;
+        function apiName(ref, name, token) {
+            return apiPost('/api/name', { hash: ref, name, token }, 'Could not set the name');
         }
 
         async function login() {
@@ -400,6 +404,7 @@
                 const encryptedContent = await encrypt(content, currentKey);
 
                 const saved = await apiSave(fileHash, encryptedContent, currentToken, currentSalt, currentVersion);
+                if (!sessionActive) return; // locked while this save was in flight
                 currentVersion = saved.version;
                 retryAttempt = -1;
                 renderNameButton(); // the note exists now, so it can be named
@@ -443,16 +448,20 @@
             }
         }
 
-        function copyLink(btn) {
+        function copyToClipboard(btn, text, fallbackFieldId) {
             const label = btn.textContent;
-            navigator.clipboard.writeText(location.href).then(() => {
+            navigator.clipboard.writeText(text).then(() => {
                 btn.textContent = 'Copied!';
                 setTimeout(() => { btn.textContent = label; }, 1500);
             }).catch(() => {
                 // Clipboard blocked (e.g. insecure context): fall back to selecting the link
-                const field = document.getElementById('linkField');
-                if (!field.closest('[hidden]')) field.select();
+                const field = document.getElementById(fallbackFieldId);
+                if (field && !field.closest('[hidden]')) field.select();
             });
+        }
+
+        function copyLink(btn) {
+            copyToClipboard(btn, location.href, 'linkField');
         }
 
         function newNote() {
@@ -480,8 +489,26 @@
             document.getElementById('passwordInput').focus();
         }
 
+        // Resolves when work settles or the deadline passes, whichever comes
+        // first — so a wedged request can delay the UI, never block it.
+        function withDeadline(work, ms) {
+            return Promise.race([
+                work.catch(() => { }),
+                new Promise(resolve => setTimeout(resolve, ms))
+            ]);
+        }
+
+        // Wait out a save already in flight, then save what's still unsaved.
+        async function flushSave() {
+            while (isSaving) await new Promise(r => setTimeout(r, 100));
+            if (dirty && !conflict) await saveIfDirty();
+        }
+
         // Locking with pending edits first tries to save them right away; the
         // user is only asked when that isn't possible (offline, conflict, ...).
+        // The flush gets one deadline covering the whole attempt: a failing
+        // save ends up back in the retry ladder, and waiting on that ladder
+        // would leave the note un-lockable for as long as the outage lasts.
         async function lockNote() {
             if (!sessionActive) return;
             const lockBtn = document.getElementById('lockBtn');
@@ -489,8 +516,7 @@
             try {
                 if (!conflict && (dirty || isSaving)) {
                     clearTimeout(saveTimeout);
-                    while (isSaving) await new Promise(r => setTimeout(r, 100));
-                    if (dirty && !conflict) await saveIfDirty();
+                    await withDeadline(flushSave(), REQUEST_TIMEOUT + 2000);
                 }
                 if ((dirty || isSaving) && !(await confirmLock())) return;
                 goToLogin();
@@ -576,6 +602,18 @@
             input.value = currentName;
             document.getElementById('nameRemoveBtn').hidden = !currentName;
             document.getElementById('nameError').textContent = message;
+
+            // Naming puts the name in the address bar, and the server never
+            // hands the random link back — a note reopened at its name can't
+            // learn its own link. So offer the link for copying while this
+            // session still knows it, and say why it matters.
+            const linkBox = document.getElementById('nameLinkBox');
+            const knowsLink = NOTE_ID_RE.test(fileHash);
+            linkBox.hidden = !knowsLink;
+            if (knowsLink) {
+                document.getElementById('nameLinkField').value = noteUrl(fileHash);
+            }
+
             dialog.showModal();
             input.focus();
             input.select();
@@ -603,6 +641,9 @@
         }
 
         document.getElementById('nameBtn').addEventListener('click', () => showNameDialog());
+        document.getElementById('nameLinkCopyBtn').addEventListener('click',
+            e => copyToClipboard(e.currentTarget, noteUrl(fileHash), 'nameLinkField'));
+        document.getElementById('nameLinkField').addEventListener('focus', e => e.target.select());
         document.getElementById('nameForm').addEventListener('submit', e => {
             e.preventDefault();
             submitName(document.getElementById('nameInput').value.trim().toLowerCase());

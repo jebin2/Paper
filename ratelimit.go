@@ -82,6 +82,26 @@ func (l *rateLimiter) allow(key string) (bool, time.Duration) {
 	return false, time.Duration((1 - b.tokens) / l.perSec * float64(time.Second))
 }
 
+// hasToken reports whether key could spend a token right now, without
+// spending one. It lets a handler refuse a request up front and only charge
+// for it once it knows what the request turned out to be.
+func (l *rateLimiter) hasToken(key string) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	b, ok := l.buckets[key]
+	if !ok {
+		return true, 0 // an unseen client starts with a full bucket
+	}
+	// Refill is derived from b.last on every read, so looking without
+	// spending leaves the bucket exactly as it was.
+	tokens := math.Min(l.burst, b.tokens+l.now().Sub(b.last).Seconds()*l.perSec)
+	if tokens >= 1 {
+		return true, 0
+	}
+	return false, time.Duration((1 - tokens) / l.perSec * float64(time.Second))
+}
+
 // sweepLocked forgets clients whose bucket has refilled completely: tracking
 // them again later starts from the same full state.
 func (l *rateLimiter) sweepLocked(now time.Time) {
@@ -92,6 +112,18 @@ func (l *rateLimiter) sweepLocked(now time.Time) {
 	}
 }
 
+// writeTooManyRequests answers a request that ran out of tokens, telling the
+// client when the next one arrives.
+func writeTooManyRequests(w http.ResponseWriter, wait time.Duration) {
+	secs := int(math.Ceil(wait.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeJSON(w, http.StatusTooManyRequests,
+		map[string]string{"error": "Too many requests. Wait a few seconds and try again."})
+}
+
 // rateLimited wraps an API handler with a limiter; a nil limiter disables it.
 func rateLimited(l *rateLimiter, next http.HandlerFunc) http.HandlerFunc {
 	if l == nil {
@@ -99,13 +131,7 @@ func rateLimited(l *rateLimiter, next http.HandlerFunc) http.HandlerFunc {
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if ok, wait := l.allow(clientKey(r)); !ok {
-			secs := int(math.Ceil(wait.Seconds()))
-			if secs < 1 {
-				secs = 1
-			}
-			w.Header().Set("Retry-After", strconv.Itoa(secs))
-			writeJSON(w, http.StatusTooManyRequests,
-				map[string]string{"error": "Too many requests. Wait a few seconds and try again."})
+			writeTooManyRequests(w, wait)
 			return
 		}
 		next(w, r)

@@ -77,6 +77,11 @@ name).
   and the editor says so.
 - Renaming frees the old name immediately. Names are deleted with their note, and
   cleanup reclaims names left behind by an interrupted rename. Capped at 10k names.
+- A name is reserved only while its note lives. Once the note expires, the next
+  asker gets the name, without waiting for a cleanup pass.
+- Because the link is never sent back, a note reopened at its name can no longer
+  learn its own random link. The name dialog therefore offers the random link for
+  copying while the tab still knows it, and says what is lost without a copy.
 
 **The trade-off:** a name is guessable, so anyone who guesses it can download that
 note's ciphertext and attack the passphrase offline, where rate limits don't apply.
@@ -130,6 +135,7 @@ the ones with secrets in them.
 | `RATE_LIMIT_SAVE_PER_MIN` | `60` | `/api/save` requests per client per minute; `0` disables |
 | `RATE_LIMIT_LOAD_PER_MIN` | `120` | `/api/load` requests per client per minute; `0` disables |
 | `RATE_LIMIT_NAME_PER_MIN` | `20` | `/api/name` requests per client per minute; `0` disables |
+| `RATE_LIMIT_NAME_LOOKUP_PER_MIN` | `10` | name guesses (`/api/load` by a name with no note) per client per minute; `0` disables |
 | `TRUST_PROXY_HEADER` | *(empty)* | Header holding the real client IP behind a proxy (`CF-Connecting-IP` in `deploy.sh`, `X-Forwarded-For` in Docker); empty = connection address |
 
 ## Run Locally
@@ -178,9 +184,20 @@ Every client gets a token bucket per endpoint:
 | `/api/save` | 60 / min | 30 |
 | `/api/load` | 120 / min | 60 |
 | `/api/name` | 20 / min | 10 |
+| name guesses | 10 / min | 5 |
 
-Over the limit, requests get `429` with `Retry-After`, before the body is even
-read. The editor shows "too many saves" and retries with backoff; the login
+A random link is unguessable, so loads by link can be generous. Names are words,
+and a guess that lands hands out ciphertext to attack offline — so names get a
+second, much smaller bucket on top of the load limit.
+
+Only a name that resolves to **nothing** is charged, because only a miss is a
+guess: resolving a name that exists is what normal use of a named note does on
+every unlock, refresh and conflict check, and never runs out. Once the budget is
+gone, every name lookup is refused, hit or miss — answering hits while refusing
+misses would tell a guesser exactly what it wanted to know, for free.
+
+Over the limit, requests get `429` with `Retry-After` — for the per-endpoint
+buckets, before the body is even read. The editor shows "too many saves" and retries with backoff; the login
 screen asks to wait. Normal use stays far below this (autosave fires at most
 once per 1.5 s per tab).
 

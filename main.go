@@ -39,6 +39,7 @@ var (
 	loadRatePerMin   = getenvInt("RATE_LIMIT_LOAD_PER_MIN", 120)
 	trustProxyHeader = getenv("TRUST_PROXY_HEADER", "")
 	nameRatePerMin   = getenvInt("RATE_LIMIT_NAME_PER_MIN", 20)
+	nameLookupPerMin = getenvInt("RATE_LIMIT_NAME_LOOKUP_PER_MIN", 10)
 	maxContentBytes  = int64(maxContentSizeMB) * 1024 * 1024
 	maxRequestBytes  = maxContentBytes + 64*1024 // JSON envelope overhead on top of the content limit
 )
@@ -84,7 +85,7 @@ func validateConfig() error {
 		return errors.New("MAX_CONTENT_SIZE_MB must be > 0")
 	case ageLimitDays < 0:
 		return errors.New("AGE_LIMIT_DAYS must be >= 0")
-	case saveRatePerMin < 0 || loadRatePerMin < 0 || nameRatePerMin < 0:
+	case saveRatePerMin < 0 || loadRatePerMin < 0 || nameRatePerMin < 0 || nameLookupPerMin < 0:
 		return errors.New("RATE_LIMIT_*_PER_MIN must be >= 0 (0 disables)")
 	case cleanupInterval <= 0:
 		return errors.New("CLEANUP_INTERVAL_MINUTES must be > 0")
@@ -95,6 +96,13 @@ func validateConfig() error {
 // --- CORS ---
 func applyCORS(w http.ResponseWriter, r *http.Request) bool {
 	if corsOrigins == "" {
+		return true
+	}
+	// No Origin means this isn't a cross-origin request at all — the app
+	// fetching its own API, or a non-browser client. There is nothing to
+	// police and nothing to grant, so it passes through untouched. Only a
+	// request that names an origin is held to the allow-list.
+	if r.Header.Get("Origin") == "" {
 		return true
 	}
 	allowed := "*"
@@ -110,6 +118,7 @@ func applyCORS(w http.ResponseWriter, r *http.Request) bool {
 			}
 		}
 		if allowed == "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Origin not allowed"})
 			return false
 		}
 	}
@@ -146,10 +155,6 @@ func applySecurityHeaders(w http.ResponseWriter) {
 	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), interest-cohort=()")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
-}
-
-func sanitizeHash(hash string) bool {
-	return hashRe.MatchString(hash)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -232,6 +237,13 @@ func sidecarPaths(base string) []string {
 
 func notePath(hash, suffix string) string {
 	return filepath.Join(dataDir, hash+suffix)
+}
+
+// noteExists reports whether a note is on disk. Content is what makes a note
+// exist, so that is the file to ask about. Callers must hold storageMu.
+func noteExists(id string) bool {
+	_, err := os.Stat(notePath(id, contentSuffix))
+	return err == nil
 }
 
 // decodeFixed decodes standard base64 and requires exactly n bytes.
@@ -458,7 +470,18 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request) (map[string]string, 
 	return body, true
 }
 
-func loadHandler(w http.ResponseWriter, r *http.Request) {
+// loadHandler serves a note by link or by name. nameLookups, when non-nil, is
+// a second, much smaller budget for lookups by name: a random link is
+// unguessable, but names are words, so they are the one enumerable way in,
+// and a guess that lands hands out ciphertext to attack offline.
+//
+// Only a name that misses is charged, because only a miss is a guess —
+// resolving a name that exists is what normal use of a named note does on
+// every unlock, refresh and conflict check, and must never run out. But once
+// the budget is gone, every name lookup is refused, hit or miss: answering
+// hits while refusing misses would tell a guesser exactly what it wanted to
+// know, for free.
+func loadHandler(w http.ResponseWriter, r *http.Request, nameLookups *rateLimiter) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -473,6 +496,15 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid link"})
 		return
 	}
+	byName := !hashRe.MatchString(ref) && nameLookups != nil
+	client := ""
+	if byName {
+		client = clientKey(r)
+		if ok, wait := nameLookups.hasToken(client); !ok {
+			writeTooManyRequests(w, wait)
+			return
+		}
+	}
 
 	// Loads never create or change files (only an existing note's mtime, as an
 	// activity mark). Serialize with save/cleanup so content and salt are read
@@ -480,6 +512,9 @@ func loadHandler(w http.ResponseWriter, r *http.Request) {
 	// written, so a large note doesn't stall other requests.
 	storageMu.Lock()
 	fileHash, found, err := resolveRef(ref)
+	if byName && !found {
+		nameLookups.allow(client) // a name that resolves to nothing was a guess
+	}
 	if err == nil && !found {
 		storageMu.Unlock()
 		// Nothing at this link or name yet: the client picks a salt and the
@@ -666,7 +701,9 @@ func newHandler() http.Handler {
 	})
 	mux.HandleFunc("/fonts/", fontsHandler)
 	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/api/load", rateLimited(newRateLimiter(loadRatePerMin), loadHandler))
+	nameLookups := newRateLimiter(nameLookupPerMin)
+	mux.HandleFunc("/api/load", rateLimited(newRateLimiter(loadRatePerMin),
+		func(w http.ResponseWriter, r *http.Request) { loadHandler(w, r, nameLookups) }))
 	mux.HandleFunc("/api/save", rateLimited(newRateLimiter(saveRatePerMin), saveHandler))
 	mux.HandleFunc("/api/name", rateLimited(newRateLimiter(nameRatePerMin), nameHandler))
 
@@ -709,8 +746,8 @@ func main() {
 
 	go func() {
 		log.Printf("Paper listening on http://%s (data dir: %s)", srv.Addr, dataDir)
-		log.Printf("Rate limits per client: save %d/min, load %d/min (0 = off); client IP from %s",
-			saveRatePerMin, loadRatePerMin, clientIPSource())
+		log.Printf("Rate limits per client: save %d/min, load %d/min, name %d/min, name lookup %d/min (0 = off); client IP from %s",
+			saveRatePerMin, loadRatePerMin, nameRatePerMin, nameLookupPerMin, clientIPSource())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server error: %v", err)
 		}

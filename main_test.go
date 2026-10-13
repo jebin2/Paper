@@ -33,6 +33,7 @@ func resetConfig(t *testing.T) string {
 	loadRatePerMin = 0
 	trustProxyHeader = ""
 	nameRatePerMin = 0
+	nameLookupPerMin = 0
 	aliasCount = 0
 	return dir
 }
@@ -644,13 +645,26 @@ func TestCORS(t *testing.T) {
 		t.Fatalf("allowed preflight: code=%d ao=%q", w.Code, w.Header().Get("Access-Control-Allow-Origin"))
 	}
 
-	// denied origin must not proceed and must not echo the origin
+	// A denied origin is told so, doesn't reach the handler, and never gets
+	// its origin echoed back.
 	req = httptest.NewRequest(http.MethodPost, "/api/save", nil)
 	req.Header.Set("Origin", "https://evil.example")
 	w = httptest.NewRecorder()
 	app.h.ServeHTTP(w, req)
-	if w.Code == http.StatusMethodNotAllowed && w.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("denied origin: got through as %d with ACAO %q", w.Code, w.Header().Get("Access-Control-Allow-Origin"))
+	if w.Code != http.StatusForbidden || w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("denied origin: code=%d (want 403) ACAO=%q", w.Code, w.Header().Get("Access-Control-Allow-Origin"))
+	}
+	if w.Body.Len() == 0 {
+		t.Fatal("denied origin got an empty body instead of an error message")
+	}
+
+	// A request with no Origin isn't a CORS request: it must still be served,
+	// or setting CORS_ORIGINS would lock out the app's own page.
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
+	w = httptest.NewRecorder()
+	app.h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-origin request with no Origin header: got %d, want 200", w.Code)
 	}
 
 	// wildcard when explicitly opted in

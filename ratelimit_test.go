@@ -193,3 +193,57 @@ func TestAPIRateLimitedEndToEnd(t *testing.T) {
 		t.Fatalf("3rd save: got %d, want 429", w.Code)
 	}
 }
+
+// Random links are unguessable, so loads by link get a generous budget. Loads
+// by name are the one enumerable way in, so a name that resolves to nothing
+// costs a token, a name that exists costs nothing, and an exhausted budget
+// refuses both — otherwise a 200-vs-429 split would answer the guess for free.
+func TestNameLookupBudgetChargesOnlyMisses(t *testing.T) {
+	resetConfig(t)
+	loadRatePerMin = 600 // burst 300: effectively unlimited here
+	nameLookupPerMin = 4 // burst 2
+	h := newHandler()
+
+	id := strings.Repeat("a", 32)
+	if code := saveNote(t, h, id, "a real note"); code != http.StatusOK {
+		t.Fatalf("create: got %d", code)
+	}
+	if code, _ := setName(t, h, id, "real-name", testToken); code != http.StatusOK {
+		t.Fatalf("name: got %d", code)
+	}
+
+	load := func(ref string) int {
+		r := httptest.NewRequest(http.MethodPost, "/api/load", strings.NewReader(`{"hash":"`+ref+`"}`))
+		r.RemoteAddr = "198.51.100.7:1234"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+
+	// Normal use of a named note: resolving a name that exists is free, so it
+	// can't be throttled however often a tab unlocks or refreshes.
+	for i := 0; i < 10; i++ {
+		if code := load("real-name"); code != http.StatusOK {
+			t.Fatalf("hit %d on an existing name: got %d, want 200", i, code)
+		}
+	}
+
+	// Guesses cost tokens.
+	for i := 0; i < 2; i++ {
+		if code := load("guess-" + strconv.Itoa(i)); code != http.StatusOK {
+			t.Fatalf("miss %d within burst: got %d, want 200", i, code)
+		}
+	}
+	if code := load("one-guess-too-many"); code != http.StatusTooManyRequests {
+		t.Fatalf("miss past the burst: got %d, want 429", code)
+	}
+	// Past the budget the real name is refused too, so a guesser can't read
+	// the answer off the status code.
+	if code := load("real-name"); code != http.StatusTooManyRequests {
+		t.Fatalf("hit with the budget gone: got %d, want 429", code)
+	}
+	// Loading by link is untouched by the name budget throughout.
+	if code := load(id); code != http.StatusOK {
+		t.Fatalf("load by link: got %d", code)
+	}
+}
