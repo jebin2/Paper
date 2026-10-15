@@ -40,6 +40,8 @@ var (
 	trustProxyHeader = getenv("TRUST_PROXY_HEADER", "")
 	nameRatePerMin   = getenvInt("RATE_LIMIT_NAME_PER_MIN", 20)
 	nameLookupPerMin = getenvInt("RATE_LIMIT_NAME_LOOKUP_PER_MIN", 10)
+	nameClaimPerHour = getenvInt("RATE_LIMIT_NAME_CLAIM_PER_HOUR", 10)
+	evictMinAgeHours = getenvInt("EVICT_MIN_AGE_HOURS", 6)
 	maxContentBytes  = int64(maxContentSizeMB) * 1024 * 1024
 	maxRequestBytes  = maxContentBytes + 64*1024 // JSON envelope overhead on top of the content limit
 )
@@ -87,6 +89,10 @@ func validateConfig() error {
 		return errors.New("AGE_LIMIT_DAYS must be >= 0")
 	case saveRatePerMin < 0 || loadRatePerMin < 0 || nameRatePerMin < 0 || nameLookupPerMin < 0:
 		return errors.New("RATE_LIMIT_*_PER_MIN must be >= 0 (0 disables)")
+	case nameClaimPerHour < 0:
+		return errors.New("RATE_LIMIT_NAME_CLAIM_PER_HOUR must be >= 0 (0 disables)")
+	case evictMinAgeHours < 0:
+		return errors.New("EVICT_MIN_AGE_HOURS must be >= 0 (0 disables the floor)")
 	case cleanupInterval <= 0:
 		return errors.New("CLEANUP_INTERVAL_MINUTES must be > 0")
 	}
@@ -154,6 +160,12 @@ func applySecurityHeaders(w http.ResponseWriter) {
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), interest-cohort=()")
 	h.Set("X-Frame-Options", "DENY")
+	// Isolate this browsing context: no other origin gets a window handle on
+	// it, and no other origin can embed its responses. CSP already blocks
+	// framing; these close the window-handle and resource-inclusion routes
+	// that CSP leaves open.
+	h.Set("Cross-Origin-Opener-Policy", "same-origin")
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
 	h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
 }
 
@@ -217,9 +229,10 @@ const (
 	contentSuffix = "_content.txt"
 	saltSuffix    = "_salt.txt"
 	authSuffix    = "_auth.txt"
+	kdfSuffix     = "_kdf.txt"
 )
 
-var sidecarSuffixes = []string{saltSuffix, authSuffix, nameSuffix}
+var sidecarSuffixes = []string{saltSuffix, authSuffix, nameSuffix, kdfSuffix}
 
 const (
 	saltBytes  = 16 // client-chosen PBKDF2 salt
@@ -244,6 +257,50 @@ func notePath(hash, suffix string) string {
 func noteExists(id string) bool {
 	_, err := os.Stat(notePath(id, contentSuffix))
 	return err == nil
+}
+
+// --- KEY DERIVATION PARAMETERS ---
+//
+// A note records how its key was derived, as "pbkdf2-sha256:<iterations>".
+// Without that record the cost is frozen forever: raising it would change
+// every existing note's key and lock its owner out. With it, new notes can
+// use today's cost while old ones keep answering to the cost they were made
+// with. Notes created before this existed have no record, and legacyKDF is
+// what the client used back then.
+const legacyKDF = "pbkdf2-sha256:250000"
+
+// The bounds are a sanity check on what gets stored, not a security control —
+// the creator chooses their own cost and can only hurt themselves. The
+// ceiling keeps a stored number from freezing the browser that reads it.
+const (
+	minKDFIterations = 100_000
+	maxKDFIterations = 4_000_000
+)
+
+var kdfRe = regexp.MustCompile(`^pbkdf2-sha256:([0-9]{1,9})$`)
+
+// validKDF reports whether s is a key-derivation record this server will store.
+func validKDF(s string) bool {
+	m := kdfRe.FindStringSubmatch(s)
+	if m == nil {
+		return false
+	}
+	n, err := strconv.Atoi(m[1])
+	return err == nil && n >= minKDFIterations && n <= maxKDFIterations
+}
+
+// noteKDF returns the note's recorded key derivation, or the legacy one for a
+// note made before notes recorded it. Callers must hold storageMu.
+func noteKDF(id string) string {
+	got, err := os.ReadFile(notePath(id, kdfSuffix))
+	if err != nil {
+		return legacyKDF
+	}
+	kdf := strings.TrimSpace(string(got))
+	if !validKDF(kdf) {
+		return legacyKDF
+	}
+	return kdf
 }
 
 // decodeFixed decodes standard base64 and requires exactly n bytes.
@@ -325,10 +382,25 @@ func cleanupFilesLocked() {
 	for _, fi := range keep {
 		keptSize += fi.size
 	}
+	// Purging by size deletes other people's notes to make room, so a client
+	// that floods the store would otherwise destroy whatever was there. A
+	// note younger than the floor is never purged for size: when only young
+	// notes are left the store simply stays full, and the write budget
+	// answers 507 instead. Refusing new writes is recoverable; deleting
+	// someone's note is not.
 	if keptSize > maxSizeBytes() {
 		sort.Slice(keep, func(i, j int) bool { return keep[i].mtime.Before(keep[j].mtime) })
 		target := int64(purgeToSizeMB) * 1024 * 1024
+		evictable := now.Add(-time.Duration(evictMinAgeHours) * time.Hour)
 		for keptSize > target && len(keep) > 0 {
+			// Sorted oldest first, so once the head is too young, so is
+			// everything behind it.
+			if !keep[0].mtime.Before(evictable) {
+				log.Printf("Cleanup: %.1f MB over the cap, but every remaining note is younger than %dh — "+
+					"keeping them and letting saves fail instead",
+					float64(keptSize-target)/(1024*1024), evictMinAgeHours)
+				break
+			}
 			del = append(del, keep[0])
 			keptSize -= keep[0].size
 			keep = keep[1:]
@@ -535,9 +607,10 @@ func loadHandler(w http.ResponseWriter, r *http.Request, nameLookups *rateLimite
 	if err == nil {
 		salt, err = os.ReadFile(notePath(fileHash, saltSuffix))
 	}
-	name := ""
+	name, kdf := "", ""
 	if err == nil {
 		name = noteName(fileHash)
+		kdf = noteKDF(fileHash)
 	}
 	if err == nil {
 		// Opening a note counts as activity: expiry and size purges go by the
@@ -561,6 +634,7 @@ func loadHandler(w http.ResponseWriter, r *http.Request, nameLookups *rateLimite
 		"salt":    string(salt),
 		"version": contentVersion(content),
 		"name":    name,
+		"kdf":     kdf,
 	})
 }
 
@@ -649,6 +723,21 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Only the creating save sets the derivation; afterwards the stored one
+	// stands, or raising the cost would lock the owner out of their own note.
+	// A client too old to send one used the legacy cost.
+	kdf := legacyKDF
+	if !exists {
+		if sent := strings.TrimSpace(body["kdf"]); sent != "" {
+			if !validKDF(sent) {
+				storageMu.Unlock()
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid key derivation"})
+				return
+			}
+			kdf = sent
+		}
+	}
+
 	// Existing content (if any) is already counted in usedBytes; replacing it
 	// with a smaller blob must not be rejected as an oversize write.
 	current := usedBytes - int64(len(old))
@@ -667,6 +756,9 @@ func saveHandler(w http.ResponseWriter, r *http.Request) {
 		// Sidecars first, content last: a crash before the content write leaves
 		// only orphans that cleanup reclaims, never a note without its salt.
 		err = atomicWrite(notePath(fileHash, saltSuffix), base64.StdEncoding.EncodeToString(salt))
+		if err == nil {
+			err = atomicWrite(notePath(fileHash, kdfSuffix), kdf)
+		}
 		if err == nil {
 			err = atomicWrite(notePath(fileHash, authSuffix), digest)
 		}
@@ -705,7 +797,9 @@ func newHandler() http.Handler {
 	mux.HandleFunc("/api/load", rateLimited(newRateLimiter(loadRatePerMin),
 		func(w http.ResponseWriter, r *http.Request) { loadHandler(w, r, nameLookups) }))
 	mux.HandleFunc("/api/save", rateLimited(newRateLimiter(saveRatePerMin), saveHandler))
-	mux.HandleFunc("/api/name", rateLimited(newRateLimiter(nameRatePerMin), nameHandler))
+	newClaims := newRateLimiterPerHour(nameClaimPerHour)
+	mux.HandleFunc("/api/name", rateLimited(newRateLimiter(nameRatePerMin),
+		func(w http.ResponseWriter, r *http.Request) { nameHandler(w, r, newClaims) }))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		applySecurityHeaders(w)
@@ -746,8 +840,10 @@ func main() {
 
 	go func() {
 		log.Printf("Paper listening on http://%s (data dir: %s)", srv.Addr, dataDir)
-		log.Printf("Rate limits per client: save %d/min, load %d/min, name %d/min, name lookup %d/min (0 = off); client IP from %s",
-			saveRatePerMin, loadRatePerMin, nameRatePerMin, nameLookupPerMin, clientIPSource())
+		log.Printf("Rate limits per client: save %d/min, load %d/min, name %d/min, name lookup %d/min, "+
+			"new name %d/hour (0 = off); client IP from %s",
+			saveRatePerMin, loadRatePerMin, nameRatePerMin, nameLookupPerMin, nameClaimPerHour, clientIPSource())
+		log.Printf("Notes younger than %dh are never purged to make room (0 = no floor)", evictMinAgeHours)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server error: %v", err)
 		}

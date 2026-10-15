@@ -2,6 +2,7 @@
         let currentKey = null;       // AES-GCM key, non-extractable; the passphrase itself isn't kept
         let currentToken = '';       // base64 write token proving knowledge of the passphrase
         let currentSalt = null;
+        let currentKdf = '';         // how this note's key is derived, fixed when it was created
         let currentVersion = '';     // server version this editor is based on ('' = note not created yet)
         let currentName = '';        // the note's memorable name, '' if it has none
         let pendingName = '';        // name typed into the URL, claimed after the first save
@@ -14,7 +15,20 @@
         let dirty = false;           // unsaved edits exist
         let sessionActive = false;   // true once login succeeds, false on logout
 
-        const PBKDF2_ITERATIONS = 250000;
+        // How a note's key is derived. The note records this when it is
+        // created and keeps it for life: raising the cost for new notes must
+        // never change the key of an existing one, or its owner is locked out.
+        // Notes made before the record existed used LEGACY_KDF.
+        const CURRENT_KDF = 'pbkdf2-sha256:600000';
+        const LEGACY_KDF = 'pbkdf2-sha256:250000';
+        const KDF_RE = /^pbkdf2-sha256:([0-9]{1,9})$/;
+
+        // null for anything this version can't run — better to say so than to
+        // derive the wrong key and call it a wrong passphrase.
+        function parseKdf(spec) {
+            const m = KDF_RE.exec(spec || '');
+            return m ? { hash: 'SHA-256', iterations: Number(m[1]) } : null;
+        }
 
         // Every request gets a deadline. Without one a stalled connection (a
         // dead tunnel, a captive portal) leaves "Saving..." on screen forever
@@ -154,7 +168,7 @@
         // the second half is the write token the server checks before letting a
         // save overwrite the note. The halves are independent, so the token
         // (which the server sees) reveals nothing about the key.
-        async function deriveSecrets(password, salt) {
+        async function deriveSecrets(password, salt, kdf) {
             const keyMaterial = await crypto.subtle.importKey(
                 'raw',
                 new TextEncoder().encode(password),
@@ -166,8 +180,8 @@
                 {
                     name: 'PBKDF2',
                     salt: salt,
-                    iterations: PBKDF2_ITERATIONS,
-                    hash: 'SHA-256'
+                    iterations: kdf.iterations,
+                    hash: kdf.hash
                 },
                 keyMaterial,
                 512
@@ -315,9 +329,10 @@
         // ignores it afterwards and keeps the original.
         // `base` is the version the edit started from; the server answers 409 if
         // the note has moved on since (another tab or device saved first).
-        function apiSave(id, content, token, salt, base) {
+        // `kdf` is recorded on the save that creates the note and ignored after.
+        function apiSave(id, content, token, salt, base, kdf) {
             return apiPost('/api/save',
-                { hash: id, content, token, salt: toBase64(salt), base }, 'Save failed');
+                { hash: id, content, token, salt: toBase64(salt), base, kdf }, 'Save failed');
         }
 
         function apiName(ref, name, token) {
@@ -349,11 +364,19 @@
                 // behind it gets a salt chosen here; the note (salt + write token)
                 // comes into existence on its first save.
                 const data = await apiLoad(fileHash);
+                // An existing note is unlocked with the cost it was made with;
+                // a note being created now gets today's.
+                const kdfSpec = data.salt ? (data.kdf || LEGACY_KDF) : CURRENT_KDF;
+                const kdf = parseKdf(kdfSpec);
+                if (!kdf) {
+                    throw new Error('Unsupported note format');
+                }
                 const salt = data.salt ? base64ToUint8Array(data.salt) : randomSalt();
-                const { key, token } = await deriveSecrets(password, salt);
+                const { key, token } = await deriveSecrets(password, salt, kdf);
                 if (data.content) {
                     content = await decrypt(data.content, key);
                 }
+                currentKdf = kdfSpec;
                 currentSalt = salt;
                 currentKey = key;
                 currentToken = token;
@@ -377,9 +400,11 @@
             } catch (error) {
                 errorDiv.textContent = error.message.includes('Decryption')
                     ? 'Wrong passphrase for this note'
-                    : error.status === 429
-                        ? 'Too many attempts — wait a few seconds and try again'
-                        : "Couldn't reach the server — check your connection";
+                    : error.message.includes('Unsupported')
+                        ? 'This note was made by a newer version of Paper — update the page and try again'
+                        : error.status === 429
+                            ? 'Too many attempts — wait a few seconds and try again'
+                            : "Couldn't reach the server — check your connection";
             } finally {
                 isWorking = false;
                 renderLoginMode();
@@ -403,7 +428,8 @@
             try {
                 const encryptedContent = await encrypt(content, currentKey);
 
-                const saved = await apiSave(fileHash, encryptedContent, currentToken, currentSalt, currentVersion);
+                const saved = await apiSave(fileHash, encryptedContent, currentToken,
+                    currentSalt, currentVersion, currentKdf);
                 if (!sessionActive) return; // locked while this save was in flight
                 currentVersion = saved.version;
                 retryAttempt = -1;
@@ -472,6 +498,7 @@
             currentKey = null;
             currentToken = '';
             currentSalt = null;
+            currentKdf = '';
             currentVersion = '';
             currentName = '';
             pendingName = '';
@@ -543,6 +570,7 @@
             currentKey = null;
             currentToken = '';
             currentSalt = null;
+            currentKdf = '';
             currentVersion = '';
             currentName = '';
             pendingName = '';

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -245,5 +246,66 @@ func TestNameLookupBudgetChargesOnlyMisses(t *testing.T) {
 	// Loading by link is untouched by the name budget throughout.
 	if code := load(id); code != http.StatusOK {
 		t.Fatalf("load by link: got %d", code)
+	}
+}
+
+// The name space is a fixed, shared 10k and a note holds its name for as long
+// as it is opened, so taking a new name is the one naming operation an abuser
+// wants to repeat. It gets a slow budget; renaming and removing stay free.
+func TestNewNameClaimsAreSlow(t *testing.T) {
+	resetConfig(t)
+	nameClaimPerHour = 4 // burst 2
+	h := newHandler()
+
+	first, second, third := strings.Repeat("a", 32), strings.Repeat("b", 32), strings.Repeat("c", 32)
+	for _, id := range []string{first, second, third} {
+		if code := saveNote(t, h, id, "a note"); code != http.StatusOK {
+			t.Fatalf("create %s: got %d", id[:4], code)
+		}
+	}
+
+	if code, _ := setName(t, h, first, "one", testToken); code != http.StatusOK {
+		t.Fatalf("first claim: got %d", code)
+	}
+	if code, _ := setName(t, h, second, "two", testToken); code != http.StatusOK {
+		t.Fatalf("second claim: got %d", code)
+	}
+	if code, resp := setName(t, h, third, "three", testToken); code != http.StatusTooManyRequests {
+		t.Fatalf("third claim: got %d (%s), want 429", code, resp.Error)
+	}
+	if _, err := os.Stat(aliasPath("three")); !os.IsNotExist(err) {
+		t.Fatal("a refused claim still took the name")
+	}
+
+	// Renaming adds no name to the world, and removing gives one back:
+	// neither is charged, however often an owner does it.
+	for i, name := range []string{"one-again", "one-more-time", "one-final"} {
+		if code, resp := setName(t, h, first, name, testToken); code != http.StatusOK {
+			t.Fatalf("rename %d: got %d (%s)", i, code, resp.Error)
+		}
+	}
+	if code, _ := setName(t, h, first, "", testToken); code != http.StatusOK {
+		t.Fatalf("remove: got %d", code)
+	}
+
+	// But a note with no name taking one again is a new claim, and the
+	// budget is still empty.
+	if code, _ := setName(t, h, first, "one-yet-again", testToken); code != http.StatusTooManyRequests {
+		t.Fatalf("re-claim after removal: got %d, want 429", code)
+	}
+
+	// A wrong token is rejected before anything is charged, so one client
+	// can't drain another's budget by guessing.
+	resetConfig(t)
+	nameClaimPerHour = 4
+	h = newHandler()
+	saveNote(t, h, first, "a note")
+	for i := 0; i < 5; i++ {
+		if code, _ := setName(t, h, first, "stolen", otherToken); code != http.StatusForbidden {
+			t.Fatalf("wrong token %d: got %d, want 403", i, code)
+		}
+	}
+	if code, _ := setName(t, h, first, "mine", testToken); code != http.StatusOK {
+		t.Fatalf("claim after failed attempts drained nothing: got %d", code)
 	}
 }

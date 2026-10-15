@@ -34,6 +34,8 @@ func resetConfig(t *testing.T) string {
 	trustProxyHeader = ""
 	nameRatePerMin = 0
 	nameLookupPerMin = 0
+	nameClaimPerHour = 0
+	evictMinAgeHours = 6
 	aliasCount = 0
 	return dir
 }
@@ -106,6 +108,7 @@ type loadResp struct {
 	Salt    string `json:"salt"`
 	Version string `json:"version"`
 	Name    string `json:"name"`
+	KDF     string `json:"kdf"`
 }
 
 func loadNote(t *testing.T, h http.Handler, hash string) (int, loadResp) {
@@ -723,6 +726,47 @@ func TestCleanupByAge(t *testing.T) {
 	}
 }
 
+// Purging by size deletes other people's notes, so a flood of fresh writes
+// must not be able to clear the store. Young notes stay; saves fail instead.
+func TestCleanupKeepsYoungNotesWhenFull(t *testing.T) {
+	app := newTestApp(t)
+	maxTotalSizeMB = 1
+	purgeToSizeMB = 1
+
+	block := strings.Repeat("a", 400*1024)
+	var paths []string
+	for _, h := range []string{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"cccccccccccccccccccccccccccccccc"} {
+		paths = append(paths, writeContentFile(t, app.dir, h, block))
+	}
+
+	cleanupFiles()
+
+	for _, p := range paths {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("young note deleted to make room: %s (%v)", p, err)
+		}
+	}
+	// The store stays over the cap, which is what makes the next save fail.
+	if usedBytes <= maxSizeBytes() {
+		t.Fatalf("usedBytes = %d, want still over the %d cap", usedBytes, maxSizeBytes())
+	}
+	code := saveNote(t, app.h, strings.Repeat("d", 32), "one more")
+	if code != http.StatusInsufficientStorage {
+		t.Fatalf("save into a full store: got %d, want 507", code)
+	}
+
+	// Once they age past the floor the purge proceeds as before.
+	old := time.Now().Add(-24 * time.Hour)
+	for _, p := range paths {
+		os.Chtimes(p, old, old)
+	}
+	cleanupFiles()
+	if usedBytes > maxSizeBytes() {
+		t.Fatalf("usedBytes = %d after the notes aged, want <= %d", usedBytes, maxSizeBytes())
+	}
+}
+
 func TestCleanupBySize(t *testing.T) {
 	app := newTestApp(t)
 	maxTotalSizeMB = 1 // cap at 1 MiB
@@ -734,8 +778,9 @@ func TestCleanupBySize(t *testing.T) {
 	pa := writeContentFile(t, app.dir, hashA, block)
 	pb := writeContentFile(t, app.dir, hashB, block)
 	pc0 := time.Now()
-	os.Chtimes(pa, pc0.Add(-2*time.Hour), pc0.Add(-2*time.Hour))
-	os.Chtimes(pb, pc0.Add(-1*time.Hour), pc0.Add(-1*time.Hour))
+	// Older than EVICT_MIN_AGE_HOURS, so both are fair game for a size purge.
+	os.Chtimes(pa, pc0.Add(-24*time.Hour), pc0.Add(-24*time.Hour))
+	os.Chtimes(pb, pc0.Add(-12*time.Hour), pc0.Add(-12*time.Hour))
 	pc := writeContentFile(t, app.dir, hashC, block)
 
 	cleanupFiles()

@@ -42,12 +42,25 @@ type rateLimiter struct {
 
 // newRateLimiter returns nil (no limiting) when perMinute <= 0.
 func newRateLimiter(perMinute int) *rateLimiter {
-	if perMinute <= 0 {
+	return newLimiter(perMinute, float64(perMinute)/60)
+}
+
+// newRateLimiterPerHour is for allowances too small to state per minute — a
+// budget of a handful per hour, for something a person does rarely and an
+// abuser would want to do thousands of times.
+func newRateLimiterPerHour(perHour int) *rateLimiter {
+	return newLimiter(perHour, float64(perHour)/3600)
+}
+
+// newLimiter builds a bucket that refills at perSec and holds half the
+// configured allowance, or one token, whichever is larger.
+func newLimiter(configured int, perSec float64) *rateLimiter {
+	if configured <= 0 {
 		return nil
 	}
 	return &rateLimiter{
-		perSec:  float64(perMinute) / 60,
-		burst:   math.Max(1, float64(perMinute)/2),
+		perSec:  perSec,
+		burst:   math.Max(1, float64(configured)/2),
 		buckets: make(map[string]*bucket),
 		now:     time.Now,
 	}

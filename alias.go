@@ -174,12 +174,19 @@ func cleanupAliasesLocked() {
 }
 
 // emptyNote is the answer for a link or name with no note behind it.
-var emptyNote = map[string]string{"content": "", "salt": "", "version": "", "name": ""}
+var emptyNote = map[string]string{"content": "", "salt": "", "version": "", "name": "", "kdf": ""}
 
 // nameHandler gives a note its memorable name, renames it, or (with an empty
 // name) removes it. Only the note's owner can: it takes the same write token
 // as saving, so holding the link alone isn't enough.
-func nameHandler(w http.ResponseWriter, r *http.Request) {
+//
+// newClaims, when non-nil, is a slow budget spent only when a note that has
+// no name takes one — the one operation that puts another name into the
+// world. The name space is a fixed, shared 10k, and a note holds its name for
+// as long as it is opened, so without this one client could take every name
+// in an afternoon and keep them forever. Renaming and removing are free:
+// neither adds a name, and both are things an owner may do often.
+func nameHandler(w http.ResponseWriter, r *http.Request, newClaims *rateLimiter) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "Method not allowed"})
 		return
@@ -231,6 +238,18 @@ func nameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Charged after the request is known to be genuine, so a wrong token
+	// can't burn someone else's budget.
+	client := ""
+	firstClaim := name != "" && newClaims != nil && noteName(id) == ""
+	if firstClaim {
+		client = clientKey(r)
+		if ok, wait := newClaims.hasToken(client); !ok {
+			writeTooManyRequests(w, wait)
+			return
+		}
+	}
+
 	if name == "" {
 		if err := clearNoteName(id); err != nil {
 			log.Printf("clear name failed: %v", err)
@@ -254,6 +273,9 @@ func nameHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if firstClaim {
+		newClaims.allow(client)
+	}
 	if err := setNoteName(id, name); err != nil {
 		log.Printf("set name failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Could not set the name"})
